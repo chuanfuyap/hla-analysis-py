@@ -1,3 +1,10 @@
+"""
+Functions to load and modify haplotype genomics files.
+
+Currently support [Beagle file](http://faculty.washington.edu/browning/beagle/b3.html) to process AA_ variant IDs. 
+
+dataprocessing code adapted from [here](https://github.com/immunogenomics/HLA-TAPAS/blob/master/HLAassoc/run_omnibus_test_WS.R)
+"""
 import pandas as pd 
 import numpy as np
 import statsmodels.api as sm
@@ -74,7 +81,6 @@ def processBglAA(bglfileloc):
     """
     Processes Beagle (phased) file to be ready for haplotype matrix
     
-    dataprocessing code adapted from [here](https://github.com/immunogenomics/HLA-TAPAS/blob/master/HLAassoc/run_omnibus_test_WS.R)
     Parameters
     ------------
     bglfileloc: str,
