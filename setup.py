@@ -7,5 +7,5 @@ setup(name="hapy",
         author='Chuan Fu Yap',
         author_email='yapchuanfu@gmail.com',
         license='GNU GPLv3',
-        packages=find_namespace_packages(include=['hapy.data', "hapy.stats"]),
+        packages=find_namespace_packages(include=['hapy.data', "hapy.stats","hapy"]),
         install_requires=['pandas', 'numpy', 'scipy', 'statsmodels'])
