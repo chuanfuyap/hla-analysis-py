@@ -62,7 +62,7 @@ def processBglAA(bglfileloc):
     """
     df = pd.read_csv(bglfileloc, sep="\s+", header=0, index_col=1)#.drop(columns=["I"], axis=1)
     markers = df.columns[0]
-    df = df[df[markers]=="M"]
+    df = df[df[markers]=="M"] #pylint: disable=E1136
     df = df.drop(markers, axis=1)
 
     df.index.name = "SNP"

@@ -10,7 +10,6 @@ from collections import Counter
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
-from statsmodels.stats.api import anova_lm
 import statsmodels.formula.api as smf
 
 from scipy import stats

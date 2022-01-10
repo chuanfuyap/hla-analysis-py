@@ -12,7 +12,7 @@ class HLAdata:
     The object type to store the all genotype information for HLA.
     """
     def __init__(self, ):
-        self.HLA4digit = None
-        self.SNPs = None
-        self.AAs = None
+        self.HLA = None
+        self.SNP = None
+        self.AA = None
         self.type = None # hardcall or probability/dosage
