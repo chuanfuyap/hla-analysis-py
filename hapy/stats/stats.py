@@ -89,7 +89,6 @@ def anova(nullmodel, altmodel,ytrue, modeltype):
     ------------
     test: float
         test statistic
-
     p: float
         p-value from the significance testing (<0.05 for altmodel to be significantly better)
     """
@@ -120,11 +119,27 @@ def anova(nullmodel, altmodel,ytrue, modeltype):
 def obt(dataframe, haplotypenumber, model):
     """
     Performs omnibustest as called by `runAnalysis`
+
+    Parameters
+    ------------
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
+    haplotypenumber: int
+        number of haplotypes in the design matrix, used to subsection out covariates.
+    model: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    test: float
+        test statistic
+    p: float
+        p-value from the significance testing (<0.05 for altmodel to be significantly better)
     """
     abt = dataframe.copy()
-
+    ### -2 is because the abt is usually structured as GENOTYPE in the first columns then last 2 are SEX then PHENOTYPE
     altf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[:-2])
     ### IN CASE OF CONDITIONING IS DONE
+    ### haplotypenumber would count up all columns of GENOTYPE, and -2 would remove SEX AND PHENOTYPE, anything in between should be extra covariates desired to be modelled.
     if len(abt.columns[haplotypenumber:-2])>0:
         nullf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[haplotypenumber:-2])
     else:
@@ -151,8 +166,8 @@ def linear_model(dataframe, model):
     Fit linear model given dataframe (abt) of features (gene copy number/probability) and target (phenotype)
     Parameters
     ------------
-    dataframe: pandas dataframe
-        the abt with genotype, phenotype and covariates
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
     model: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
     Returns
@@ -227,7 +242,7 @@ def runAnalysis(dataframe, famfile, modeltype):
     df = dataframe.copy()
 
     fam = famfile[["IID","SEX","PHENO"]].set_index("IID")
-    fam.PHENO = fam.PHENO-1
+    fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK often use 1/2 for phenotype.
     fam = fam.sort_index()
 
     ### for if famfile has less samples than dataframe
@@ -325,9 +340,9 @@ def makehaplodf(aa_df, basicQC=True):
     df = aa_df.copy()
     aminoacids = df.index
 
-    df = df.drop(columns=['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS'], axis=1).T
+    df = df.drop(columns=['AA_ID'], axis=1).T
 
-    df["haplo"] = df.apply(lambda x : "".join(x), axis=1)
+    df["haplo"] = df.apply(lambda x : "".join(x), axis=1) #pylint: disable=W0108
     df = df.reset_index()
     df["index"] = df["index"].apply(lambda x : x.split(".")[0])
     df = df.groupby(["index", "haplo"]).size().unstack(fill_value=0)

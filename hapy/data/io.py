@@ -1,5 +1,5 @@
 """
-Functions to read in genomics files.
+Functions to read in genomics files. (io short for input/output)
 
 Currently support:
 - [Phased Beagle file](http://faculty.washington.edu/browning/beagle/b3.html) to process AA_ variant IDs.
@@ -10,6 +10,8 @@ Some of the data processing code adapted from [here](https://github.com/immunoge
 __all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage"]
 import pandas as pd
 import numpy as np
+
+from hapy.data.HLAdat import HLAdata
 
 def read_famfile(fileloc):
     """
@@ -50,11 +52,18 @@ def read_bgl(fileloc, simpleQC=True):
 
     df["SNP"] = df.index
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand")
-
+    print("----------------")
+    print("READING IN DATA")
+    print("----------------")
     df = df.drop(columns=["SNP"], axis=1)
+    hladat = HLAdata(df, "hardcall")
+    if simpleQC:
+        print("----------------------------------------------------")
+        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("----------------------------------------------------")
+        hladat.qualitycontrol()
 
-
-    return df
+    return hladat
 
 def read_gprobs(fileloc, simpleQC=True):
     """
@@ -102,7 +111,9 @@ def breakitup(variantID):
         aapos - amino acid position number
         genepos - genomic coordinate
     """
-    tokens = variantID.split("_")
+    tmpID = variantID.replace("*", "_")
+    tmpID = tmpID.replace("SNPS_", "SNP_")
+    tokens = tmpID.split("_")
     if len(tokens) > 1:
         idname = ("_").join(tokens[:4])
         while len(tokens)<4:
@@ -114,7 +125,7 @@ def breakitup(variantID):
     else:
         idname = variantID
         if variantID.startswith("rs"):
-            variantype = "SNPS"
+            variantype = "SNP"
         else:
             variantype = variantID
         genename = np.nan
