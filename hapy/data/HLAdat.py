@@ -7,6 +7,8 @@ Currently support:
 
 If you have VCF file, please use Beagle's util files for converting to bgl/gprob files.
 """
+import numpy as np
+
 class HLAdata:
     """
     The object type to store the all genotype information for HLA.
@@ -20,7 +22,7 @@ class HLAdata:
         genomedata: formatted Pandas DataFrame,
             dataframe formatted with additional info when reading in the data.
         type: str
-            data type, hardcall or dosage file.
+            data type, hardcall or softcall (dosage) file.
         """
 
         self.HLA = self.add_data(genomedata[genomedata.TYPE=="HLA"], "HLA")
@@ -57,6 +59,16 @@ class HLAdata:
                 info.loc[:,"AA_POS"] = tmp_pos
             datadict["info"] = info
             datadict["data"] = data
+        elif allele_type == "AA":
+            ### now sectioning just a amino acids with >1 amino acids at the same position
+            tmpix = np.where(info.groupby("AA_ID").count()["POS"]>1)[0]
+            tmpix = info.groupby("AA_ID").count().index[tmpix]
+            
+            info = info[info.AA_ID.isin(tmpix)]
+            data = data.loc[info.index]
+            datadict["info"] = info
+            datadict["data"] = data
+
         else: ## else HLA/AA
             datadict["info"] = info
             datadict["data"] = data
@@ -73,8 +85,11 @@ class HLAdata:
 
         if self.type == "hardcall":
             self.SNP["data"] = self.qcSNP_hard(self.SNP["data"], allelefilter)
+            self.SNP["info"] =self.SNP["info"].loc[self.SNP["data"].index]
             self.HLA["data"] = self.qcHLA_hard(self.HLA["data"], allelefilter)
+            self.HLA["info"] =self.HLA["info"].loc[self.HLA["data"].index]
             self.AA["data"] = self.qcAA_hard(self.AA["data"], allelefilter)
+            self.AA["info"] =self.AA["info"].loc[self.AA["data"].index]
         elif self.type == "softcall":
             #self.SNP["data"] = self.qcSNP_soft(self.SNP["data"], allelefilter)
             #self.HLA["data"] = self.qcHLA_soft(self.HLA["data"], allelefilter)

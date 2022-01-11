@@ -4,8 +4,8 @@ Functions built for analysis:
 Currently supports:
 - Linear model and omnibus test for HLA amino acids with beagle files as input.
 
-TODO: need to turn this into a class/module
 """
+__all__ = ["analyseAA"]
 from collections import Counter
 import pandas as pd
 import numpy as np
@@ -193,10 +193,11 @@ def linear_model(dataframe, model):
 
 def getRefAA(haplo, aalist):
     """
-    Used within `runAnalysis` to know what is the reference AA to be saved in output.
+    Used within `analyseAA` to know what is the reference AA to be saved in output.
     """
     haplo = np.array(list(haplo))
-    presence = list(np.nonzero(haplo=="T")[0])
+    #presence = list(np.nonzero(haplo=="T")[0])
+    presence = list(np.where((haplo=="P") | (haplo=="T"))[0])
 
     ### breaking down the amino acids from the idlist
     aminoacids = np.array([i.split("_")[-1] for i in aalist])
@@ -207,22 +208,70 @@ def getRefAA(haplo, aalist):
 
     return aminoacids
 
-def subsectionFam(dataframe, famfile, aminoacid=True):
+def subsectionFam(dataframe, famfile, datatype):
     """
-    Used within `runAnalysis` for if the supplied fam file have less samples than the genotype file.
+    Used within runnign of analysis for if the supplied fam file have less samples than the genotype file.
     """
     df = dataframe.copy()
     newix = []
-    for x in famfile.index:
-        newix.append(x)
-        newix.append(x+".1")
 
-    if aminoacid:
-        newix.extend(['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS'])
+    if datatype == "softcall":
+        newix = list(famfile.index)
+    elif datatype == "hardcall":
+        for x in famfile.index:
+            newix.append(x)
+            newix.append(x+".1")
 
     return df[newix]
 
-def runAnalysis(dataframe, famfile, modeltype):
+def obthaplo_hard(aadf):
+    """
+    function to hide away big chunk of code difference between hardcall/softcall
+    """
+    ## make haplotype matrix
+    haplodf, aalist = makehaplodf(aadf)
+    AAcount = haplodf.shape[1]
+
+    ### check if having none of haplotypes is in the column
+    missing = "".join(np.repeat("A", aadf.shape[0]))
+    if missing in haplodf.columns:
+        haplodf = haplodf.drop(missing, axis=1)
+        haplocount = haplodf.shape[1]
+
+        refAA = "missing"
+
+    ### dropping most frequent haplotype as reference
+    else:
+        refix = np.argmax(haplodf.sum())
+        refcol = haplodf.columns[refix]
+        haplodf = haplodf.drop(refcol, axis=1)
+        haplocount = haplodf.shape[1]
+
+        refAA = getRefAA(refcol, aadf.index)
+
+    return haplodf, AAcount, refAA, aalist, haplocount
+
+def obthaplo_soft(aadf):
+    """
+    function to hide away big chunk of code difference between hardcall/softcall
+    """
+    ## make haplotype matrix
+    haplodf = makehaploprob(aadf)
+    aalist = haplodf.columns
+    AAcount = len(aalist)
+
+    ### dropping most frequent haplotype as reference
+    refix = np.argmax(haplodf.sum())
+    refAA = haplodf.columns[refix]
+    haplodf = haplodf.drop(refAA, axis=1)
+    haplocount = haplodf.shape[1]
+
+    ## renaming columns to prevent function conflict
+    haplodf.columns = ["AA_"+cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
+
+    return haplodf, AAcount, refAA, aalist, haplocount
+
+def analyseAA(hladat, famfile, modeltype):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models/omnibus test using the appropriate `modeltype`
 
@@ -239,42 +288,32 @@ def runAnalysis(dataframe, famfile, modeltype):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-    df = dataframe.copy()
+    df = hladat.AA["data"].copy()
+    info = hladat.AA["info"].copy()
 
     fam = famfile[["IID","SEX","PHENO"]].set_index("IID")
     fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK often use 1/2 for phenotype.
     fam = fam.sort_index()
 
     ### for if famfile has less samples than dataframe
-    df = subsectionFam(df, fam)
+    df = subsectionFam(df, fam, hladat.type)
 
-    aminoacids = df.AA_ID.unique()
+    aminoacids = info.AA_ID.unique()
 
     colnames = ["AA_ID", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
 
+    df["AA_ID"] = info["AA_ID"]
+
     for x in aminoacids:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         aadf = df[df.AA_ID==x]
-        haplodf, aalist = makehaplodf(aadf)
-        AAcount = haplodf.shape[1]
+        aainfo = info[info.AA_ID==x]
 
-        ### check if having none of haplotypes is in the column
-        missing = "".join(np.repeat("A", aadf.shape[0]))
-        if missing in haplodf.columns:
-            haplodf = haplodf.drop(missing, axis=1)
-            haplocount = haplodf.shape[1]
-
-            refAA = "missing"
-
-        ### dropping most frequent haplotype as reference
-        else:
-            refix = np.argmax(haplodf.sum())
-            refcol = haplodf.columns[refix]
-            haplodf = haplodf.drop(refcol, axis=1)
-            haplocount = haplodf.shape[1]
-
-            refAA = getRefAA(refcol, aadf.index)
+        if hladat.type == "softcall":
+            haplodf, AAcount, refAA, aalist, haplocount = obthaplo_soft(aadf)
+        elif hladat.type == "hardcall":
+            haplodf, AAcount, refAA, aalist, haplocount = obthaplo_hard(aadf)
 
         ### building abt
         abt = pd.concat([haplodf, fam], axis=1)
@@ -307,8 +346,8 @@ def runAnalysis(dataframe, famfile, modeltype):
         aalist = [str(x) for x in aalist]
         aalist = ", ".join(set(aalist))
         output = output.append({"AA_ID":aadf.AA_ID.unique()[0],
-                                "GENE":aadf.GENE.unique()[0],
-                                "AA_POS":aadf.AA_POS.unique()[0],
+                                "GENE":aainfo.GENE.unique()[0],
+                                "AA_POS":aainfo.AA_POS.unique()[0],
                                 "LR_p": lrp,
                                 "Anova_p": anovap,
                                 "multi_Coef": multicoef,
@@ -324,7 +363,7 @@ def runAnalysis(dataframe, famfile, modeltype):
 
 def makehaplodf(aa_df, basicQC=True):
     """
-    Generates haplotype matrix from the
+    Generates haplotype matrix from the genotype dataframe
 
     Parameters
     ------------
@@ -351,7 +390,7 @@ def makehaplodf(aa_df, basicQC=True):
     ### while the variant/allele e.g. AA_A_19_29910588_A might have a lot of "T"(presence) in the samples,
     ### but when haplotype is formed across the amino acids in the same position, e.g. AATA etc, the haplotype might be low in frequency, so they are dropped
     if basicQC:
-        highfreq = df.sum(0)/2/df.shape[0] >0.1
+        highfreq = df.sum(0)/2/df.shape[0] >0.01
         highfreq = highfreq[highfreq]
         df=df[highfreq.index]
 
@@ -359,6 +398,44 @@ def makehaplodf(aa_df, basicQC=True):
     aminoacids = get_aminoacids(aminoacids, haplo)
 
     return df.sort_index(), aminoacids
+
+def makehaploprob(aa_df, basicQC=True):
+    """
+    Generates haplotype matrix from the dosage genotype dataframe
+
+    Parameters
+    ------------
+    aa_df: pandas DataFrame,
+        processed Beagle file in dataframe format containing just a single gene with multiple amino acid at a given position
+    basicQC: Boolean
+        to perform qc on haplotype matrix generated, dropping haplotype with frequency less than 10% across samples
+    Returns
+    ------------
+    df: pandas DataFrame
+        processed beagle file ready for haplotype matrix generation
+    """
+    df = aa_df.copy()
+
+    df = df.drop(columns=['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS'], axis=1)
+    ## picking out the amino acids from variant IDs
+    df["AA"] = df.index
+    df["AA"] = df.AA.apply(lambda x : x.split("_")[-1])
+    ## selecting IDs with just 1 amino acid (non-ambigious)
+    df["aa_length"] = df.AA.apply(lambda x : len(x)) #pylint: disable=W0108
+    df = df[df.aa_length==1]
+    ## returning final output
+    df = df.set_index("AA").drop("aa_length", axis=1)
+    df = df.astype("float")
+
+    df = df.T.sort_index()
+
+    if basicQC:
+        highfreq = df.sum(0)/(df.shape[0]*2) > 0.01
+        highfreq = highfreq[highfreq]
+
+        df=df[highfreq.index]
+
+    return df.sort_index()
 
 def checkAAblock(aablock):
     """
@@ -396,7 +473,8 @@ def get_aminoacids(idlist, haplotypes):
     for x in haplotypes:
         presence = []
         haplo = np.array(list(x))
-        presence = list(np.nonzero(haplo=="T")[0])
+        presence = list(np.where((haplo=="P") | (haplo=="T"))[0])
+        #presence = list(np.nonzero(haplo=="T")[0])
 
         ## extracting amino acid from list based of presence (T) in this given haplotype
         block = list(aalist[presence])

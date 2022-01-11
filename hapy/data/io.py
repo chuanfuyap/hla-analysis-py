@@ -5,7 +5,7 @@ Currently support:
 - [Phased Beagle file](http://faculty.washington.edu/browning/beagle/b3.html) to process AA_ variant IDs.
 - [SNP2HLA](https://software.broadinstitute.org/mpg/snp2hla/snp2hla_manual.html) dosage files.
 
-Some of the data processing code adapted from [here](https://github.com/immunogenomics/HLA-TAPAS/blob/master/HLAassoc/run_omnibus_test_WS.R)
+Some of the hardcall data processing code adapted from [here](https://github.com/immunogenomics/HLA-TAPAS/blob/master/HLAassoc/run_omnibus_test_WS.R)
 """
 __all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage"]
 import pandas as pd
