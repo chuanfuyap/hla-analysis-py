@@ -112,14 +112,52 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
 
     Parameters
     ------------
-    fileloc: str,
+    dosagefileloc: str,
         file location of the dosage file
+    phasefileloc: str
+        file location of the phase file, this is needed for append sample IDs to the dosage file.
     Returns
     ------------
     hladat: HLAdat
         HLAdat object that has dataframe of the genomic data files
     """
+    sampleIDs = getSampleIDs(phasedfileloc)
+    header = ["alleleA", "alleleB"]
+    header.extend(sampleIDs)
+    print("----------------")
+    print("READING IN DATA")
+    print("----------------")
+    df = pd.read_csv(dosagefileloc, sep=r"\s+", header=None, index_col=0)
+    df.columns = header
 
+    ## gets information from variant ID
+    df.index.name = "SNP" #pylint: disable=E1101
+    df["SNP"] = df.index #pylint: disable=E1101,E1137
+    df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand") #pylint: disable=E1101,E1137
+    df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
+
+    hladat = HLAdata(df, "softcall")
+
+    if simpleQC:
+        print("----------------------------------------------------")
+        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("----------------------------------------------------")
+        hladat.qualitycontrol()
+
+    return df
+
+def getSampleIDs(phasedfileloc):
+    """
+    Extracts sample ID from phased file
+
+    """
+    with open(phasedfileloc, "r") as f:
+        sampIDs = f.readline().split()[2:]
+        idCount2 = len(sampIDs)
+        sampIDs = np.array(sampIDs)
+        ix = [i for i in range(1,idCount2,2)]
+
+    return sampIDs[ix]
 
 def breakitup(variantID):
     """
