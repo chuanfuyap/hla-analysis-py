@@ -8,6 +8,7 @@ Currently support:
 If you have VCF file, please use Beagle's util files for converting to bgl/gprob files.
 """
 import numpy as np
+import pandas as pd
 
 class HLAdata:
     """
@@ -63,7 +64,7 @@ class HLAdata:
             ### now sectioning just a amino acids with >1 amino acids at the same position
             tmpix = np.where(info.groupby("AA_ID").count()["POS"]>1)[0]
             tmpix = info.groupby("AA_ID").count().index[tmpix]
-            
+
             info = info[info.AA_ID.isin(tmpix)]
             data = data.loc[info.index]
             datadict["info"] = info
@@ -86,15 +87,23 @@ class HLAdata:
         if self.type == "hardcall":
             self.SNP["data"] = self.qcSNP_hard(self.SNP["data"], allelefilter)
             self.SNP["info"] =self.SNP["info"].loc[self.SNP["data"].index]
+
             self.HLA["data"] = self.qcHLA_hard(self.HLA["data"], allelefilter)
             self.HLA["info"] =self.HLA["info"].loc[self.HLA["data"].index]
+
             self.AA["data"] = self.qcAA_hard(self.AA["data"], allelefilter)
             self.AA["info"] =self.AA["info"].loc[self.AA["data"].index]
+
         elif self.type == "softcall":
-            #self.SNP["data"] = self.qcSNP_soft(self.SNP["data"], allelefilter)
-            #self.HLA["data"] = self.qcHLA_soft(self.HLA["data"], allelefilter)
-            #self.AA["data"] = self.qcAA_soft(self.AA["data"], allelefilter)
-            pass
+            self.SNP["data"] = self.qc_prob(self.SNP["data"], allelefilter)
+            self.SNP["info"] =self.SNP["info"].loc[self.SNP["data"].index]
+
+            self.HLA["data"] = self.qc_prob(self.HLA["data"], allelefilter)
+            self.HLA["info"] =self.HLA["info"].loc[self.HLA["data"].index]
+
+            self.AA["data"] = self.qc_prob(self.AA["data"], allelefilter)
+            self.AA["info"] =self.AA["info"].loc[self.AA["data"].index]
+
         else:
             print("wrong data type set, please investigate")
 
@@ -137,6 +146,85 @@ class HLAdata:
         df = df.loc[keepallele]
 
         return df
+
+    def qc_prob(self, dataframe, alellefilter=0.01):
+        """
+        Takes dosage data and perform quality control, variants with sample frequency < 1%
+
+        Parameters
+        -----------
+        dataframe:
+            Beagle dataset to undergo quality control
+        allelfilter: float
+            allele frequency (% of alleles across all samples)
+        Returns
+        ------------
+        df: Pandas DataFrame
+            processed dataset
+
+        """
+        df = dataframe.copy()
+
+        ### QC allele frequency
+        highfreqallele = df.sum(1)/(df.shape[1]*2) > alellefilter
+        df = df.loc[highfreqallele]
+
+        return df
+
+    def convertDosage(self):
+        """
+        Converts probability/likelihood data into dosage information where 2(AA) + 1(AB) + 0(BB)
+        """
+        self.SNP["data"] = makedosage(self.SNP["data"])
+        self.HLA["data"] = makedosage(self.HLA["data"])
+        self.AA["data"] = makedosage(self.AA["data"])
+
+def dosage(x, newAT):
+    """
+    Dosage computation function
+
+    Parameters
+    ----------
+    newAT: boolean
+        this is for Michigan HLA imputation output format where it uses A for absence and T for presence, and is of reverse order in alleleA/B.
+    """
+    AA,AB,BB = x.iloc[0],x.iloc[1],x.iloc[2]
+
+    if newAT:
+        dose = (0*AA)+ (1*AB) + (2*BB)
+    else:
+        dose = (2*AA)+ (1*AB) + (0*BB)
+    return dose
+
+def makedosage(dataframe):
+    """
+    Takes just dataframe of markers (as index) and sample IDs (as columns).
+    """
+    confirmAT = checkAT(dataframe["alleleA"],dataframe["alleleB"])
+
+    samplenames = dataframe.columns[2:]
+
+    df = dataframe[samplenames].T.copy()
+    df["samples"] = df.index
+    df.samples = df.samples.apply(lambda x : x.split('.')[0])
+
+    dosedf = {}
+    for samp in df.samples.unique():
+        sampdf = df[df.samples==samp]
+        dose = dosage(sampdf,confirmAT)
+        dosedf[samp]=dose
+
+    dosedf = pd.DataFrame(dosedf)
+    dosedf = dosedf.drop("samples", axis=0)
+
+    return dosedf
+
+def checkAT(colA, colB):
+    "Basic check to see if it is using Michigan HLA imputation A/T absence/presence format."
+    if colA.unique()[0]=="A" and colB.unique()[0]=="T":
+        return True
+    else:
+        return False
 
 def filter_allele(series, allelefilter):
     """

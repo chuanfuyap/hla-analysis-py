@@ -43,6 +43,9 @@ def read_bgl(fileloc, simpleQC=True):
     hladat: HLAdat
         HLAdat object that has dataframe of the genomic data files
     """
+    print("----------------")
+    print("READING IN DATA")
+    print("----------------")
     df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=1)#.drop(columns=["I"], axis=1)
     markers = df.columns[0]
     df = df[df[markers]=="M"]  #pylint: disable=E1136
@@ -52,9 +55,7 @@ def read_bgl(fileloc, simpleQC=True):
 
     df["SNP"] = df.index
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand")
-    print("----------------")
-    print("READING IN DATA")
-    print("----------------")
+
     df = df.drop(columns=["SNP"], axis=1)
     hladat = HLAdata(df, "hardcall")
     if simpleQC:
@@ -78,8 +79,34 @@ def read_gprobs(fileloc, simpleQC=True):
     hladat: HLAdat
         HLAdat object that has dataframe of the genomic data files
     """
+    print("----------------")
+    print("READING IN DATA")
+    print("----------------")
+    df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=0)
+    namecheck = df.index.name
+    assert namecheck == "marker", "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
 
-def read_dosage(fileloc, simpleQC=True):
+    ## gets information from variant ID
+    df.index.name = "SNP" #pylint: disable=E1101
+    df["SNP"] = df.index #pylint: disable=E1101,E1137
+    df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand") #pylint: disable=E1101,E1137
+    df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
+
+    hladat = HLAdata(df, "softcall")
+    print("---------------------")
+    print("CONVERTING TO DOSAGE")
+    print("---------------------")
+    hladat.convertDosage()
+
+    if simpleQC:
+        print("----------------------------------------------------")
+        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("----------------------------------------------------")
+        hladat.qualitycontrol()
+
+    return hladat
+
+def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
     """
     Processes dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 

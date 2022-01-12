@@ -224,7 +224,7 @@ def subsectionFam(dataframe, famfile, datatype):
 
     return df[newix]
 
-def obthaplo_hard(aadf):
+def obt_haplo_hard(aadf):
     """
     function to hide away big chunk of code difference between hardcall/softcall
     """
@@ -251,7 +251,7 @@ def obthaplo_hard(aadf):
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
-def obthaplo_soft(aadf):
+def obt_haplo_soft(aadf):
     """
     function to hide away big chunk of code difference between hardcall/softcall
     """
@@ -311,9 +311,9 @@ def analyseAA(hladat, famfile, modeltype):
         aainfo = info[info.AA_ID==x]
 
         if hladat.type == "softcall":
-            haplodf, AAcount, refAA, aalist, haplocount = obthaplo_soft(aadf)
+            haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_soft(aadf)
         elif hladat.type == "hardcall":
-            haplodf, AAcount, refAA, aalist, haplocount = obthaplo_hard(aadf)
+            haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
 
         ### building abt
         abt = pd.concat([haplodf, fam], axis=1)
@@ -416,7 +416,7 @@ def makehaploprob(aa_df, basicQC=True):
     """
     df = aa_df.copy()
 
-    df = df.drop(columns=['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS'], axis=1)
+    df = df.drop(columns=['AA_ID'], axis=1)
     ## picking out the amino acids from variant IDs
     df["AA"] = df.index
     df["AA"] = df.AA.apply(lambda x : x.split("_")[-1])
