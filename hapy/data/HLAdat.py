@@ -25,11 +25,23 @@ class HLAdata:
         type: str
             data type, hardcall or softcall (dosage) file.
         """
+        if data_type=="hardcall":
+            self.HLA = self.add_data(genomedata[genomedata.TYPE=="HLA"], "HLA")
+            self.SNP = self.add_data(genomedata[genomedata.TYPE=="SNP"], "SNP")
+            self.AA = self.add_data(genomedata[genomedata.TYPE=="AA"], "AA")
+            self.type = data_type # hardcall or probability/dosage
+        elif data_type=="softcall":
+            alleleAB = genomedata[["alleleA", "alleleB", "TYPE"]]
+            self.HLA = self.add_data(genomedata[genomedata.TYPE=="HLA"], "HLA")
+            self.HLA["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="HLA"][["alleleA", "alleleB"]]
 
-        self.HLA = self.add_data(genomedata[genomedata.TYPE=="HLA"], "HLA")
-        self.SNP = self.add_data(genomedata[genomedata.TYPE=="SNP"], "SNP")
-        self.AA = self.add_data(genomedata[genomedata.TYPE=="AA"], "AA")
-        self.type = data_type # hardcall or probability/dosage
+            self.SNP = self.add_data(genomedata[genomedata.TYPE=="SNP"], "SNP")
+            self.SNP["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="SNP"][["alleleA", "alleleB"]]
+
+            self.AA = self.add_data(genomedata[genomedata.TYPE=="AA"], "AA")
+            self.AA["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="AA"][["alleleA", "alleleB"]]
+
+            self.type = data_type # hardcall or probability/dosage
 
     def add_data(self, genomedata, allele_type):
         """
@@ -59,6 +71,10 @@ class HLAdata:
                 info.loc[:,"POS"] = info.loc[:,"AA_POS"].values
                 info.loc[:,"AA_POS"] = tmp_pos
             datadict["info"] = info
+
+            normalsnps = [x for x in data.index if not x.startswith("SNP")]
+            data = data.loc[normalsnps]
+
             datadict["data"] = data
         elif allele_type == "AA":
             ### now sectioning just a amino acids with >1 amino acids at the same position
@@ -71,6 +87,8 @@ class HLAdata:
             datadict["data"] = data
 
         else: ## else HLA/AA
+            data.index = [ix.replace("*","_").replace(":","") for ix in data.index]
+            info.index = [ix.replace("*","_").replace(":","") for ix in info.index]
             datadict["info"] = info
             datadict["data"] = data
 
@@ -163,9 +181,10 @@ class HLAdata:
             processed dataset
 
         """
-        df = dataframe.copy()
+        df = dataframe.copy().fillna(0)
 
         ### QC allele frequency
+
         highfreqallele = df.sum(1)/(df.shape[1]*2) > alellefilter
         df = df.loc[highfreqallele]
 

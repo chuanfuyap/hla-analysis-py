@@ -5,7 +5,7 @@ Currently supports:
 - Linear model and omnibus test for HLA amino acids with beagle files as input.
 
 """
-__all__ = ["analyseAA"]
+__all__ = ["analyseAA", "analyseSNP", "analyseHLA"]
 from collections import Counter
 import pandas as pd
 import numpy as np
@@ -271,6 +271,26 @@ def obt_haplo_soft(aadf):
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
+def processAnalysisInput_(data, info, famfile, datatype):
+    """
+    Summarise analysis Input files for all analyses functions
+    """
+    data = data.copy()
+    info = info.copy()
+
+    fam = famfile.copy()
+    fam = famfile[["IID","SEX","PHENO"]].set_index("IID")
+    fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK often use 1/2 for phenotype.
+    fam = fam.sort_index()
+
+    ### for if famfile has less samples than dataframe
+    data = subsectionFam(data, fam, datatype)
+
+    data["AA_ID"] = info["AA_ID"]
+    variants = info.AA_ID.unique()
+
+    return data, info, fam, variants
+
 def analyseAA(hladat, famfile, modeltype):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models/omnibus test using the appropriate `modeltype`
@@ -288,22 +308,10 @@ def analyseAA(hladat, famfile, modeltype):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-    df = hladat.AA["data"].copy()
-    info = hladat.AA["info"].copy()
+    df, info, fam, aminoacids = processAnalysisInput_(hladat.AA["data"], hladat.AA["info"], famfile, hladat.type)
 
-    fam = famfile[["IID","SEX","PHENO"]].set_index("IID")
-    fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK often use 1/2 for phenotype.
-    fam = fam.sort_index()
-
-    ### for if famfile has less samples than dataframe
-    df = subsectionFam(df, fam, hladat.type)
-
-    aminoacids = info.AA_ID.unique()
-
-    colnames = ["AA_ID", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
+    colnames = ["VARIANT", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
-
-    df["AA_ID"] = info["AA_ID"]
 
     for x in aminoacids:
         ### sectioning out singular gene amino acid position and making haplotype matrix
@@ -345,7 +353,7 @@ def analyseAA(hladat, famfile, modeltype):
 
         aalist = [str(x) for x in aalist]
         aalist = ", ".join(set(aalist))
-        output = output.append({"AA_ID":aadf.AA_ID.unique()[0],
+        output = output.append({"VARIANT":aadf.AA_ID.unique()[0],
                                 "GENE":aainfo.GENE.unique()[0],
                                 "AA_POS":aainfo.AA_POS.unique()[0],
                                 "LR_p": lrp,
@@ -357,9 +365,110 @@ def analyseAA(hladat, famfile, modeltype):
                                 "Ref_AA": refAA},
                                 ignore_index=True)
 
-        output["LRp_Unip"] = output[["LR_p","Uni_p"]].fillna(0).sum(1).replace(0, np.nan)
+    output["LRp_Unip"] = output[["LR_p","Uni_p"]].fillna(0).sum(1).replace(0, np.nan)
 
     return output
+
+def analyseSNP(hladat, famfile, modeltype):
+    """
+    Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`
+
+    Parameters
+    ------------
+    dataframe: pandas DataFrame,
+        the genotype file containing either copy number or probability (dosage)
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+    df, info, fam, snps = processAnalysisInput_(hladat.SNP["data"], hladat.SNP["info"], famfile, hladat.type)
+
+    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
+    output = pd.DataFrame(columns=colnames)
+
+    for x in snps:
+        ### sectioning out singular gene amino acid position and making haplotype matrix
+        snpdf = df[df.AA_ID==x]
+        snpinfo = info[info.AA_ID==x]
+
+        if hladat.type == "softcall":
+            nu_snpdf = snpdf.drop(columns=['AA_ID'], axis=1).T.sort_index()
+        #elif hladat.type == "hardcall":
+            #haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
+
+        ### building abt
+        abt = pd.concat([nu_snpdf, fam], axis=1)
+        ### run analysis
+        uni_p, coef = linear_model(abt, modeltype)
+
+        output = output.append({"VARIANT":snpdf.AA_ID.unique()[0],
+                                "POS":snpinfo.POS.unique()[0],
+                                "Uni_p": uni_p,
+                                "Uni_Coef": coef},
+                                ignore_index=True)
+
+    return output
+
+def analyseHLA(hladat, famfile, modeltype):
+    """
+    Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`
+
+    Parameters
+    ------------
+    dataframe: pandas DataFrame,
+        the genotype file containing either copy number or probability (dosage)
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+    df, info, fam, hla = processAnalysisInput_(hladat.HLA["data"], hladat.HLA["info"], famfile, hladat.type)
+
+    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
+    output = pd.DataFrame(columns=colnames)
+
+    for x in hla:
+        ### sectioning out singular gene amino acid position and making haplotype matrix
+        hladf = df[df.AA_ID==x]
+        hlainfo = info[info.AA_ID==x]
+
+        if hladat.type == "softcall":
+            nu_hladf = hladf.drop(columns=['AA_ID'], axis=1).T.sort_index()
+        #elif hladat.type == "hardcall":
+            #haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
+
+        ### building abt
+        abt = pd.concat([nu_hladf, fam], axis=1)
+        ### run analysis
+        uni_p, coef = linear_model(abt, modeltype)
+
+        output = output.append({"VARIANT":hladf.AA_ID.unique()[0],
+                                "POS":hlainfo.POS.unique()[0],
+                                "Uni_p": uni_p,
+                                "Uni_Coef": coef},
+                                ignore_index=True)
+
+    return output
+
+def allelefreqcheck(alleledf,allelename):
+    """
+    Checks for allele frequency average, if it is too high, it will not be used in modelling.
+    """
+    check = alleledf[allelename].sum()/(alleledf.shape[0]*2)
+
+    if check <0.995:
+        return True
+    else:
+        return False
 
 def makehaplodf(aa_df, basicQC=True):
     """
@@ -436,6 +545,8 @@ def makehaploprob(aa_df, basicQC=True):
         df=df[highfreq.index]
 
     return df.sort_index()
+
+
 
 def checkAAblock(aablock):
     """

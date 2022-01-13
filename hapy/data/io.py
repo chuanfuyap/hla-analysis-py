@@ -137,6 +137,10 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
     df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
 
     hladat = HLAdata(df, "softcall")
+    ## drops ["alleleA", "alleleB"] off from "data" as this is now stored in "info" of the HLAData object
+    hladat.SNP["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.HLA["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.AA["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
 
     if simpleQC:
         print("----------------------------------------------------")
@@ -144,7 +148,7 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
         print("----------------------------------------------------")
         hladat.qualitycontrol()
 
-    return df
+    return hladat
 
 def getSampleIDs(phasedfileloc):
     """
@@ -153,11 +157,12 @@ def getSampleIDs(phasedfileloc):
     """
     with open(phasedfileloc, "r") as f:
         sampIDs = f.readline().split()[2:]
-        idCount2 = len(sampIDs)
         sampIDs = np.array(sampIDs)
+
+        idCount2 = len(sampIDs)
         ix = [i for i in range(1,idCount2,2)]
 
-    return sampIDs[ix]
+    return list(sampIDs[ix])
 
 def breakitup(variantID):
     """
