@@ -9,7 +9,6 @@ If you have VCF file, please use Beagle's util files for converting to bgl/gprob
 """
 from types import SimpleNamespace
 
-import numpy as np
 import pandas as pd
 
 class HLAdata:
@@ -87,11 +86,11 @@ class HLAdata:
             outputdict = SimpleNamespace(**datadict)
         elif allele_type == "AA":
             ### now sectioning just a amino acids with >1 amino acids at the same position
-            tmpix = np.where(info.groupby("AA_ID").count()["POS"]>1)[0]
-            tmpix = info.groupby("AA_ID").count().index[tmpix]
+            #tmpix = np.where(info.groupby("AA_ID").count()["POS"]>1)[0]
+            #tmpix = info.groupby("AA_ID").count().index[tmpix]
 
-            info = info[info.AA_ID.isin(tmpix)]
-            data = data.loc[info.index]
+            #info = info[info.AA_ID.isin(tmpix)]
+            #data = data.loc[info.index]
             extradata = None
             datadict["info"] = info
             datadict["data"] = data
@@ -207,14 +206,29 @@ class HLAdata:
         """
         Converts probability/likelihood data into dosage information where 2(AA) + 1(AB) + 0(BB)
         """
-        self.SNP.data = makedosage(self.SNP.data)
-        self.HLA.data = makedosage(self.HLA.data)
+        self.SNP.data = makedosage_(self.SNP.data)
+        self.HLA.data = makedosage_(self.HLA.data)
         self.AA.data = makedosage(self.AA.data)
 
-def dosage(x, newAT):
+def dosage(x):
     """
-    Dosage computation function
+    Dosage computation function FOR AA
 
+    Parameters
+    ----------
+    newAT: boolean
+        this is for Michigan HLA imputation output format where it uses A for absence and T for presence, and is of reverse order in alleleA/B.
+    """
+    AA,AB,BB,check = x.iloc[0],x.iloc[1],x.iloc[2],x.iloc[3]
+
+    if check==1:
+        dose = (0*AA)+ (1*AB) + (2*BB)
+    else:
+        dose = (2*AA)+ (1*AB) + (0*BB)
+    return dose
+def dosage_(x, newAT):
+    """
+    Dosage computation function FOR SNP/HLA
     Parameters
     ----------
     newAT: boolean
@@ -227,12 +241,35 @@ def dosage(x, newAT):
     else:
         dose = (2*AA)+ (1*AB) + (0*BB)
     return dose
-
 def makedosage(dataframe):
     """
-    Takes just dataframe of markers (as index) and sample IDs (as columns).
+    Takes just dataframe of markers (as index) and sample IDs (as columns). FOR AA
     """
-    confirmAT = checkAT(dataframe["alleleA"],dataframe["alleleB"])
+    samplenames = dataframe.columns[2:]
+    absamp = dataframe[["alleleA", "alleleB"]]
+    ATchecks = absamp.apply(checkAT, axis=1)
+
+    df = dataframe[samplenames].T.copy()
+    df["samples"] = df.index
+    df.samples = df.samples.apply(lambda x : x.split('.')[0])
+
+    dosedf = {}
+    for samp in df.samples.unique():
+        sampdf = df[df.samples==samp]
+        sampdf = sampdf.append(ATchecks, ignore_index=True)
+        dose = sampdf.apply(dosage, axis=0)
+        dosedf[samp]=dose
+
+    dosedf = pd.DataFrame(dosedf)
+    dosedf = dosedf.drop("samples", axis=0)
+
+    return dosedf
+
+def makedosage_(dataframe):
+    """
+    Takes just dataframe of markers (as index) and sample IDs (as columns). FOR SNP/HLA
+    """
+    confirmAT = checkAT_(dataframe["alleleA"],dataframe["alleleB"])
 
     samplenames = dataframe.columns[2:]
 
@@ -243,7 +280,7 @@ def makedosage(dataframe):
     dosedf = {}
     for samp in df.samples.unique():
         sampdf = df[df.samples==samp]
-        dose = dosage(sampdf,confirmAT)
+        dose = dosage_(sampdf,confirmAT)
         dosedf[samp]=dose
 
     dosedf = pd.DataFrame(dosedf)
@@ -251,9 +288,17 @@ def makedosage(dataframe):
 
     return dosedf
 
-def checkAT(colA, colB):
-    "Basic check to see if it is using Michigan HLA imputation A/T absence/presence format."
-    if colA.unique()[0]=="A" and colB.unique()[0]=="T":
+def checkAT_(colA, colB):
+    "Basic check to see if it is using Michigan HLA imputation A/T absence/presence format. FOR SNP/HLA"
+    if set(colA.unique()) == {"A"} and set(colB.unique()) == {"T"}:
+        return True
+    else:
+        return False
+
+def checkAT(df):
+    "Basic check to see if it is using Michigan HLA imputation A/T absence/presence format. FOR AA"
+    name_check=df.name
+    if df["alleleA"]=="A" and df["alleleB"]=="T" and name_check.startswith("AA_"):
         return True
     else:
         return False

@@ -251,23 +251,37 @@ def obt_haplo_hard(aadf):
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
-def obt_haplo_soft(aadf):
+def obt_haplo_soft(aadf, infodf):
     """
     function to hide away big chunk of code difference between hardcall/softcall
     """
-    ## make haplotype matrix
-    haplodf = makehaploprob(aadf)
-    aalist = haplodf.columns
-    AAcount = len(aalist)
+    if aadf.shape[0] > 1:
+        ## make haplotype matrix
+        haplodf = makehaploprob(aadf)
+        aalist = haplodf.columns
+        AAcount = len(aalist)
 
-    ### dropping most frequent haplotype as reference
-    refix = np.argmax(haplodf.sum())
-    refAA = haplodf.columns[refix]
-    haplodf = haplodf.drop(refAA, axis=1)
-    haplocount = haplodf.shape[1]
+        ### dropping most frequent haplotype as reference
+        refix = np.argmax(haplodf.sum())
+        refAA = haplodf.columns[refix]
+        haplodf = haplodf.drop(refAA, axis=1)
+        haplocount = haplodf.shape[1]
 
-    ## renaming columns to prevent function conflict
-    haplodf.columns = ["AA_"+cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
+        ## renaming columns to prevent function conflict
+        haplodf.columns = ["AA_"+cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
+    else:
+        haplodf = aadf.drop("AA_ID", axis=1).T
+        haplodf.columns = ["solo_amino_acid"]
+        AAcount = 2
+
+        suffix = aadf.index[0].split("_")[-1]
+        if len(suffix) == 1:
+            refAA = suffix
+            aalist = [suffix,"missing"]
+        else:
+            refAA = infodf["alleleA"].values[0]
+            aalist = infodf[["alleleA", "alleleB"]].values[0]
+        haplocount = haplodf.shape[1]
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
@@ -319,7 +333,7 @@ def analyseAA(hladat, famfile, modeltype):
         aainfo = info[info.AA_ID==x]
 
         if hladat.type == "softcall":
-            haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_soft(aadf)
+            haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_soft(aadf, aainfo)
         elif hladat.type == "hardcall":
             haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
 
@@ -350,6 +364,7 @@ def analyseAA(hladat, famfile, modeltype):
             refAA = np.nan
             coef = np.nan
             multicoef = np.nan
+            print("please investigate: {}".format(x))
 
         aalist = [str(x) for x in aalist]
         aalist = ", ".join(set(aalist))
@@ -433,7 +448,7 @@ def analyseHLA(hladat, famfile, modeltype):
     """
     df, info, fam, hla = processAnalysisInput_(hladat.HLA.data, hladat.HLA.info, famfile, hladat.type)
 
-    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
+    colnames = ["VARIANT", "GENE", "POS", "Uni_p", "Uni_Coef"]
     output = pd.DataFrame(columns=colnames)
 
     for x in hla:
@@ -452,6 +467,7 @@ def analyseHLA(hladat, famfile, modeltype):
         uni_p, coef = linear_model(abt, modeltype)
 
         output = output.append({"VARIANT":hladf.AA_ID.unique()[0],
+                                "GENE":hlainfo.GENE.unique()[0],
                                 "POS":hlainfo.POS.unique()[0],
                                 "Uni_p": uni_p,
                                 "Uni_Coef": coef},
