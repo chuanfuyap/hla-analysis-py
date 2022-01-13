@@ -12,4 +12,5 @@ setup(name="hapy",
         license='GNU GPLv3',
         #packages=find_namespace_packages(include=['hapy.data', "hapy.stats","hapy"]),
         packages=find_packages(),
+        python_requires='>3.3',
         install_requires=['pandas', 'numpy', 'scipy', 'statsmodels'])

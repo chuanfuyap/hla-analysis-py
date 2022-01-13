@@ -138,9 +138,9 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
 
     hladat = HLAdata(df, "softcall")
     ## drops ["alleleA", "alleleB"] off from "data" as this is now stored in "info" of the HLAData object
-    hladat.SNP["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
-    hladat.HLA["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
-    hladat.AA["data"].drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.SNP.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.HLA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.AA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
 
     if simpleQC:
         print("----------------------------------------------------")

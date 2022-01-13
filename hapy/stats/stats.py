@@ -308,7 +308,7 @@ def analyseAA(hladat, famfile, modeltype):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-    df, info, fam, aminoacids = processAnalysisInput_(hladat.AA["data"], hladat.AA["info"], famfile, hladat.type)
+    df, info, fam, aminoacids = processAnalysisInput_(hladat.AA.data, hladat.AA.info, famfile, hladat.type)
 
     colnames = ["VARIANT", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
@@ -386,7 +386,7 @@ def analyseSNP(hladat, famfile, modeltype):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-    df, info, fam, snps = processAnalysisInput_(hladat.SNP["data"], hladat.SNP["info"], famfile, hladat.type)
+    df, info, fam, snps = processAnalysisInput_(hladat.SNP.data, hladat.SNP.info, famfile, hladat.type)
 
     colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
     output = pd.DataFrame(columns=colnames)
@@ -431,7 +431,7 @@ def analyseHLA(hladat, famfile, modeltype):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-    df, info, fam, hla = processAnalysisInput_(hladat.HLA["data"], hladat.HLA["info"], famfile, hladat.type)
+    df, info, fam, hla = processAnalysisInput_(hladat.HLA.data, hladat.HLA.info, famfile, hladat.type)
 
     colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
     output = pd.DataFrame(columns=colnames)

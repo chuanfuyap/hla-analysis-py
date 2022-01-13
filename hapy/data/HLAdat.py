@@ -7,6 +7,8 @@ Currently support:
 
 If you have VCF file, please use Beagle's util files for converting to bgl/gprob files.
 """
+from types import SimpleNamespace
+
 import numpy as np
 import pandas as pd
 
@@ -33,13 +35,13 @@ class HLAdata:
         elif data_type=="softcall":
             alleleAB = genomedata[["alleleA", "alleleB", "TYPE"]]
             self.HLA = self.add_data(genomedata[genomedata.TYPE=="HLA"], "HLA")
-            self.HLA["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="HLA"][["alleleA", "alleleB"]]
+            self.HLA.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="HLA"][["alleleA", "alleleB"]]
 
             self.SNP = self.add_data(genomedata[genomedata.TYPE=="SNP"], "SNP")
-            self.SNP["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="SNP"][["alleleA", "alleleB"]]
+            self.SNP.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="SNP"][["alleleA", "alleleB"]]
 
             self.AA = self.add_data(genomedata[genomedata.TYPE=="AA"], "AA")
-            self.AA["info"][["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="AA"][["alleleA", "alleleB"]]
+            self.AA.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE=="AA"][["alleleA", "alleleB"]]
 
             self.type = data_type # hardcall or probability/dosage
 
@@ -57,6 +59,7 @@ class HLAdata:
             dictionary containing the "data" and "info", which are genotype data and their information respectively.
         """
         datadict = {}
+
         data = genomedata.drop(columns=["AA_ID","TYPE", "GENE", "AA_POS", "POS"], axis=1).copy()
         info = genomedata[["AA_ID", "GENE", "AA_POS", "POS"]].copy()
 
@@ -70,12 +73,18 @@ class HLAdata:
                 tmp_pos = info.loc[:,"POS"].values
                 info.loc[:,"POS"] = info.loc[:,"AA_POS"].values
                 info.loc[:,"AA_POS"] = tmp_pos
+
             datadict["info"] = info
+
+            extrasnps = [x for x in data.index if x.startswith("SNP")] ## EXTRA DATA FOR HLA GENE SNPS THAT USES A/T AS WELL.
+
+            extradata = data.loc[extrasnps].copy()
+            datadict["extradata"] = extradata
 
             normalsnps = [x for x in data.index if not x.startswith("SNP")]
             data = data.loc[normalsnps]
-
             datadict["data"] = data
+            outputdict = SimpleNamespace(**datadict)
         elif allele_type == "AA":
             ### now sectioning just a amino acids with >1 amino acids at the same position
             tmpix = np.where(info.groupby("AA_ID").count()["POS"]>1)[0]
@@ -83,16 +92,20 @@ class HLAdata:
 
             info = info[info.AA_ID.isin(tmpix)]
             data = data.loc[info.index]
+            extradata = None
             datadict["info"] = info
             datadict["data"] = data
 
+            outputdict = SimpleNamespace(**datadict)
         else: ## else HLA/AA
             data.index = [ix.replace("*","_").replace(":","") for ix in data.index]
             info.index = [ix.replace("*","_").replace(":","") for ix in info.index]
+            extradata = None
             datadict["info"] = info
             datadict["data"] = data
+            outputdict = SimpleNamespace(**datadict)
 
-        return datadict
+        return outputdict
 
     def qualitycontrol(self, allelefilter=0.01):
         """
@@ -103,24 +116,24 @@ class HLAdata:
         """
 
         if self.type == "hardcall":
-            self.SNP["data"] = self.qcSNP_hard(self.SNP["data"], allelefilter)
-            self.SNP["info"] =self.SNP["info"].loc[self.SNP["data"].index]
+            self.SNP.data = self.qcSNP_hard(self.SNP.data, allelefilter)
+            self.SNP.info =self.SNP.info.loc[self.SNP.data.index]
 
-            self.HLA["data"] = self.qcHLA_hard(self.HLA["data"], allelefilter)
-            self.HLA["info"] =self.HLA["info"].loc[self.HLA["data"].index]
+            self.HLA.data = self.qcHLA_hard(self.HLA.data, allelefilter)
+            self.HLA.info =self.HLA.info.loc[self.HLA.data.index]
 
-            self.AA["data"] = self.qcAA_hard(self.AA["data"], allelefilter)
-            self.AA["info"] =self.AA["info"].loc[self.AA["data"].index]
+            self.AA.data = self.qcAA_hard(self.AA.data, allelefilter)
+            self.AA.info =self.AA.info.loc[self.AA.data.index]
 
         elif self.type == "softcall":
-            self.SNP["data"] = self.qc_prob(self.SNP["data"], allelefilter)
-            self.SNP["info"] =self.SNP["info"].loc[self.SNP["data"].index]
+            self.SNP.data = self.qc_prob(self.SNP.data, allelefilter)
+            self.SNP.info =self.SNP.info.loc[self.SNP.data.index]
 
-            self.HLA["data"] = self.qc_prob(self.HLA["data"], allelefilter)
-            self.HLA["info"] =self.HLA["info"].loc[self.HLA["data"].index]
+            self.HLA.data = self.qc_prob(self.HLA.data, allelefilter)
+            self.HLA.info =self.HLA.info.loc[self.HLA.data.index]
 
-            self.AA["data"] = self.qc_prob(self.AA["data"], allelefilter)
-            self.AA["info"] =self.AA["info"].loc[self.AA["data"].index]
+            self.AA.data = self.qc_prob(self.AA.data, allelefilter)
+            self.AA.info =self.AA.info.loc[self.AA.data.index]
 
         else:
             print("wrong data type set, please investigate")
@@ -194,9 +207,9 @@ class HLAdata:
         """
         Converts probability/likelihood data into dosage information where 2(AA) + 1(AB) + 0(BB)
         """
-        self.SNP["data"] = makedosage(self.SNP["data"])
-        self.HLA["data"] = makedosage(self.HLA["data"])
-        self.AA["data"] = makedosage(self.AA["data"])
+        self.SNP.data = makedosage(self.SNP.data)
+        self.HLA.data = makedosage(self.HLA.data)
+        self.AA.data = makedosage(self.AA.data)
 
 def dosage(x, newAT):
     """
