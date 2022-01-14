@@ -191,23 +191,6 @@ def linear_model(dataframe, model):
 
     return pvalue, round(coef, 3)
 
-def getRefAA(haplo, aalist):
-    """
-    Used within `analyseAA` to know what is the reference AA to be saved in output.
-    """
-    haplo = np.array(list(haplo))
-    #presence = list(np.nonzero(haplo=="T")[0])
-    presence = list(np.where((haplo=="P") | (haplo=="T"))[0])
-
-    ### breaking down the amino acids from the idlist
-    aminoacids = np.array([i.split("_")[-1] for i in aalist])
-    ### matching amino acid with presence marker
-    aminoacids = aminoacids[presence]
-
-    aminoacids = checkAAblock(aminoacids)
-
-    return aminoacids
-
 def subsectionFam(dataframe, famfile, datatype):
     """
     Used within runnign of analysis for if the supplied fam file have less samples than the genotype file.
@@ -219,8 +202,8 @@ def subsectionFam(dataframe, famfile, datatype):
         newix = list(famfile.index)
     elif datatype == "hardcall":
         for x in famfile.index:
-            newix.append(x)
-            newix.append(x+".1")
+            newix.append(str(x))
+            newix.append(str(x)+".1")
 
     return df[newix]
 
@@ -228,26 +211,47 @@ def obt_haplo_hard(aadf):
     """
     function to hide away big chunk of code difference between hardcall/softcall
     """
-    ## make haplotype matrix
-    haplodf, aalist = makehaplodf(aadf)
-    AAcount = haplodf.shape[1]
+    if aadf.shape[0] > 1: ### for multiple amino acid in the same position represented with absence presence
+        ## make haplotype matrix
+        haplodf, aalist = makehaplodf(aadf)
+        AAcount = haplodf.shape[1]
 
-    ### check if having none of haplotypes is in the column
-    missing = "".join(np.repeat("A", aadf.shape[0]))
-    if missing in haplodf.columns:
-        haplodf = haplodf.drop(missing, axis=1)
-        haplocount = haplodf.shape[1]
+        ### check if having none of haplotypes is in the column
+        missing = "".join(np.repeat("A", aadf.shape[0]))
+        missing2 = "".join(np.repeat("a", aadf.shape[0]))
+        if missing in haplodf.columns or missing2 in haplodf.columns:
+            haplodf = haplodf.drop(missing, axis=1)
+            haplocount = haplodf.shape[1]
 
-        refAA = "missing"
+            refAA = "missing"
 
-    ### dropping most frequent haplotype as reference
+        ### dropping most frequent haplotype as reference
+        else:
+            refix = np.argmax(haplodf.sum())
+            refcol = haplodf.columns[refix]
+            haplodf = haplodf.drop(refcol, axis=1)
+            haplocount = haplodf.shape[1]
+
+            refAA = getRefAA(refcol, aadf.index)
     else:
-        refix = np.argmax(haplodf.sum())
-        refcol = haplodf.columns[refix]
-        haplodf = haplodf.drop(refcol, axis=1)
-        haplocount = haplodf.shape[1]
+        haplodf, aalist = makehaplodf(aadf)
+        aalist = list(haplodf.columns.values)
 
-        refAA = getRefAA(refcol, aadf.index)
+        if len(aalist)>1:
+            ### dropping most frequent haplotype as reference
+            refix = np.argmax(haplodf.sum())
+            refcol = haplodf.columns[refix]
+            haplodf = haplodf.drop(refcol, axis=1)
+            haplocount = haplodf.shape[1]
+            refAA = refcol
+            AAcount = 2
+        else:
+            print(aalist, aadf.AA_ID.values)
+
+            aalist.append("missing")
+            haplocount = haplodf.shape[1]
+            refAA = aalist[0]
+            AAcount = 0
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
@@ -600,7 +604,7 @@ def get_aminoacids(idlist, haplotypes):
     for x in haplotypes:
         presence = []
         haplo = np.array(list(x))
-        presence = list(np.where((haplo=="P") | (haplo=="T"))[0])
+        presence = list(np.where((haplo=="P") | (haplo=="T") | (haplo=="p"))[0])### IF WANT TO TEST HATK CAN ADD IN "p"
         #presence = list(np.nonzero(haplo=="T")[0])
 
         ## extracting amino acid from list based of presence (T) in this given haplotype
@@ -611,3 +615,20 @@ def get_aminoacids(idlist, haplotypes):
             aablocks.append(block)
 
     return aablocks
+
+def getRefAA(haplo, aalist):
+    """
+    Used within `analyseAA` to know what is the reference AA to be saved in output.
+    """
+    haplo = np.array(list(haplo))
+    #presence = list(np.nonzero(haplo=="T")[0])
+    presence = list(np.where((haplo=="P") | (haplo=="T") | (haplo=="p"))[0])
+
+    ### breaking down the amino acids from the idlist
+    aminoacids = np.array([i.split("_")[-1] for i in aalist])
+    ### matching amino acid with presence marker
+    aminoacids = aminoacids[presence]
+
+    aminoacids = checkAAblock(aminoacids)
+
+    return aminoacids
