@@ -246,7 +246,7 @@ def obt_haplo_hard(aadf):
             refAA = refcol
             AAcount = 2
         else:
-            print(aalist, aadf.AA_ID.values)
+            #print(aalist, aadf.AA_ID.values)
 
             aalist.append("missing")
             haplocount = haplodf.shape[1]
@@ -368,7 +368,7 @@ def analyseAA(hladat, famfile, modeltype):
             refAA = np.nan
             coef = np.nan
             multicoef = np.nan
-            print("please investigate: {}".format(x))
+            #print("please investigate: {}".format(x))
 
         aalist = [str(x) for x in aalist]
         aalist = ", ".join(set(aalist))
@@ -417,13 +417,18 @@ def analyseSNP(hladat, famfile, modeltype):
 
         if hladat.type == "softcall":
             nu_snpdf = snpdf.drop(columns=['AA_ID'], axis=1).T.sort_index()
-        #elif hladat.type == "hardcall":
-            #haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
+            AAcount = 2
+        elif hladat.type == "hardcall":
+            nu_snpdf, AAcount, _, _, _ = obt_haplo_hard(snpdf)
 
+        nu_snpdf.columns = ["snp_{}".format(col) for col in nu_snpdf.columns]
         ### building abt
         abt = pd.concat([nu_snpdf, fam], axis=1)
         ### run analysis
-        uni_p, coef = linear_model(abt, modeltype)
+        if AAcount == 2:
+            uni_p, coef = linear_model(abt, modeltype)
+        else:
+            uni_p, coef = np.nan, np.nan
 
         output = output.append({"VARIANT":snpdf.AA_ID.unique()[0],
                                 "POS":snpinfo.POS.unique()[0],
@@ -462,9 +467,10 @@ def analyseHLA(hladat, famfile, modeltype):
 
         if hladat.type == "softcall":
             nu_hladf = hladf.drop(columns=['AA_ID'], axis=1).T.sort_index()
-        #elif hladat.type == "hardcall":
-            #haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
+        elif hladat.type == "hardcall":
+            nu_hladf, _, _, _, _ = obt_haplo_hard(hladf)
 
+        nu_hladf.columns = ["hla_{}".format(col) for col in nu_hladf.columns]
         ### building abt
         abt = pd.concat([nu_hladf, fam], axis=1)
         ### run analysis
@@ -565,7 +571,6 @@ def makehaploprob(aa_df, basicQC=True):
         df=df[highfreq.index]
 
     return df.sort_index()
-
 
 
 def checkAAblock(aablock):
