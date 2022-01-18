@@ -193,9 +193,10 @@ def linear_model(dataframe, model):
 
 def subsectionFam(dataframe, famfile, datatype):
     """
-    Used within runnign of analysis for if the supplied fam file have less samples than the genotype file.
+    Used within running of analysis for if the supplied fam file have less samples than the genotype file.
     """
     df = dataframe.copy()
+    print("original data sample size:\t{}".format(df.shape[1]))
     newix = []
 
     if datatype == "softcall":
@@ -205,6 +206,7 @@ def subsectionFam(dataframe, famfile, datatype):
             newix.append(str(x))
             newix.append(str(x)+".1")
 
+    print("trimmed data sample size:\t{}".format(len(newix)))
     return df[newix]
 
 def obt_haplo_hard(aadf):
