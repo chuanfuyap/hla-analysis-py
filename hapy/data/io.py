@@ -30,7 +30,7 @@ def read_famfile(fileloc):
                     sep=r"\s+", names=["FID", "IID", "FAT", "MOT", "SEX", "PHENO"] ,na_values = [-9,"-9"])
     return fam
 
-def read_bgl(fileloc, simpleQC=True):
+def read_bgl(fileloc, filterR2=None, simpleQC=True):
     """
     Processes Beagle (phased) file and store it as HLAdat object. This gives the hardcall of the variants.
 
@@ -38,6 +38,8 @@ def read_bgl(fileloc, simpleQC=True):
     ------------
     fileloc: str,
         file location of the beagle (phased) file
+    filterR2: str
+        file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
     Returns
     ------------
     hladat: HLAdat
@@ -50,6 +52,11 @@ def read_bgl(fileloc, simpleQC=True):
     markers = df.columns[0]
     df = df[df[markers]=="M"]  #pylint: disable=E1136
     df = df.drop(markers, axis=1)
+
+    if filterR2:
+        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>0.5].index
+        df = df.loc[safe] #pylint: disable=E1136
 
     df.index.name = "SNP"
 
@@ -66,7 +73,7 @@ def read_bgl(fileloc, simpleQC=True):
 
     return hladat
 
-def read_gprobs(fileloc, simpleQC=True):
+def read_gprobs(fileloc, filterR2=None, simpleQC=True):
     """
     Processes Beagle probability (phased) file, transform it into dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
@@ -74,6 +81,8 @@ def read_gprobs(fileloc, simpleQC=True):
     ------------
     fileloc: str,
         file location of the beagle probability (phased) file
+    filterR2: str
+        file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
     Returns
     ------------
     hladat: HLAdat
@@ -85,6 +94,11 @@ def read_gprobs(fileloc, simpleQC=True):
     df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=0)
     namecheck = df.index.name
     assert namecheck == "marker", "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
+
+    if filterR2:
+        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>0.5].index
+        df = df.loc[safe] #pylint: disable=E1101,E1137
 
     ## gets information from variant ID
     df.index.name = "SNP" #pylint: disable=E1101
@@ -106,7 +120,7 @@ def read_gprobs(fileloc, simpleQC=True):
 
     return hladat
 
-def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
+def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
     """
     Processes dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
@@ -116,6 +130,8 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
         file location of the dosage file
     phasefileloc: str
         file location of the phase file, this is needed for append sample IDs to the dosage file.
+    filterR2: str
+        file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
     Returns
     ------------
     hladat: HLAdat
@@ -129,6 +145,11 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
     print("----------------")
     df = pd.read_csv(dosagefileloc, sep=r"\s+", header=None, index_col=0)
     df.columns = header
+
+    if filterR2:
+        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>0.5].index
+        df = df.loc[safe] #pylint: disable=E1136
 
     ## gets information from variant ID
     df.index.name = "SNP" #pylint: disable=E1101
@@ -149,6 +170,8 @@ def read_dosage(dosagefileloc, phasedfileloc, simpleQC=True):
         hladat.qualitycontrol()
 
     return hladat
+
+
 
 def getSampleIDs(phasedfileloc):
     """
