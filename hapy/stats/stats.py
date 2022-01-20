@@ -437,7 +437,7 @@ def analyseSNP(hladat, famfile, modeltype):
                                 "POS":snpinfo.POS.unique()[0],
                                 "Uni_p": uni_p,
                                 "Uni_Coef": coef,
-                                "CI_0.025": conf_int1, 
+                                "CI_0.025": conf_int1,
                                 "CI_0.975": conf_int2},
                                 ignore_index=True)
 
@@ -486,7 +486,7 @@ def analyseHLA(hladat, famfile, modeltype):
                                 "POS":hlainfo.POS.unique()[0],
                                 "Uni_p": uni_p,
                                 "Uni_Coef": coef,
-                                "CI_0.025": conf_int1, 
+                                "CI_0.025": conf_int1,
                                 "CI_0.975": conf_int2},
                                 ignore_index=True)
 
