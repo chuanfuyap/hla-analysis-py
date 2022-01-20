@@ -188,8 +188,9 @@ def linear_model(dataframe, model):
 
     pvalue = model.pvalues[abt.columns[0]]
     coef = model.params[abt.columns[0]]
+    ci1,ci2 = model.conf_int().loc[abt.columns[0], 0], model.conf_int().loc[abt.columns[0], 1]
 
-    return pvalue, round(coef, 3)
+    return pvalue, round(coef, 3), ci1,ci2
 
 def subsectionFam(dataframe, famfile, datatype):
     """
@@ -357,7 +358,7 @@ def analyseAA(hladat, famfile, modeltype):
 
         ### Perform univariate test between 2 amino acids
         elif AAcount==2:
-            uni_p, coef = linear_model(abt, modeltype)
+            uni_p, coef, _, _ = linear_model(abt, modeltype)
 
             lrp = np.nan
             anovap = np.nan
@@ -409,7 +410,7 @@ def analyseSNP(hladat, famfile, modeltype):
     """
     df, info, fam, snps = processAnalysisInput_(hladat.SNP.data, hladat.SNP.info, famfile, hladat.type)
 
-    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef"]
+    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975"]
     output = pd.DataFrame(columns=colnames)
 
     for x in snps:
@@ -428,14 +429,16 @@ def analyseSNP(hladat, famfile, modeltype):
         abt = pd.concat([nu_snpdf, fam], axis=1)
         ### run analysis
         if AAcount == 2:
-            uni_p, coef = linear_model(abt, modeltype)
+            uni_p, coef, conf_int1, conf_int2 = linear_model(abt, modeltype)
         else:
             uni_p, coef = np.nan, np.nan
 
         output = output.append({"VARIANT":snpdf.AA_ID.unique()[0],
                                 "POS":snpinfo.POS.unique()[0],
                                 "Uni_p": uni_p,
-                                "Uni_Coef": coef},
+                                "Uni_Coef": coef,
+                                "CI_0.025": conf_int1, 
+                                "CI_0.975": conf_int2},
                                 ignore_index=True)
 
     return output
@@ -459,7 +462,7 @@ def analyseHLA(hladat, famfile, modeltype):
     """
     df, info, fam, hla = processAnalysisInput_(hladat.HLA.data, hladat.HLA.info, famfile, hladat.type)
 
-    colnames = ["VARIANT", "GENE", "POS", "Uni_p", "Uni_Coef"]
+    colnames = ["VARIANT", "GENE", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975"]
     output = pd.DataFrame(columns=colnames)
 
     for x in hla:
@@ -476,13 +479,15 @@ def analyseHLA(hladat, famfile, modeltype):
         ### building abt
         abt = pd.concat([nu_hladf, fam], axis=1)
         ### run analysis
-        uni_p, coef = linear_model(abt, modeltype)
+        uni_p, coef, conf_int1, conf_int2  = linear_model(abt, modeltype)
 
         output = output.append({"VARIANT":hladf.AA_ID.unique()[0],
                                 "GENE":hlainfo.GENE.unique()[0],
                                 "POS":hlainfo.POS.unique()[0],
                                 "Uni_p": uni_p,
-                                "Uni_Coef": coef},
+                                "Uni_Coef": coef,
+                                "CI_0.025": conf_int1, 
+                                "CI_0.975": conf_int2},
                                 ignore_index=True)
 
     return output
