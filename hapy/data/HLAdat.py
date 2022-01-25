@@ -222,9 +222,9 @@ def dosage(x):
     AA,AB,BB,check = x.iloc[0],x.iloc[1],x.iloc[2],x.iloc[3]
 
     if check==1:
-        dose = (0*AA)+ (1*AB) + (2*BB)
+        dose = (0*AA)+ (1*AB) + (2*BB) # because in new AT, allele B is T for present.
     else:
-        dose = (2*AA)+ (1*AB) + (0*BB)
+        dose = (2*AA)+ (1*AB) + (0*BB) # makes allele A the effect allele and allle B the reference.
     return dose
 def dosage_(x, newAT):
     """
@@ -237,9 +237,9 @@ def dosage_(x, newAT):
     AA,AB,BB = x.iloc[0],x.iloc[1],x.iloc[2]
 
     if newAT:
-        dose = (0*AA)+ (1*AB) + (2*BB)
+        dose = (0*AA)+ (1*AB) + (2*BB) # because in new AT, allele B is T for present.
     else:
-        dose = (2*AA)+ (1*AB) + (0*BB)
+        dose = (2*AA)+ (1*AB) + (0*BB) # makes allele A the effect allele and allle B the reference.
     return dose
 def makedosage(dataframe):
     """

@@ -189,7 +189,6 @@ def linear_model(dataframe, model):
     pvalue = model.pvalues[abt.columns[0]]
     coef = model.params[abt.columns[0]]
     ci1,ci2 = model.conf_int().loc[abt.columns[0], 0], model.conf_int().loc[abt.columns[0], 1]
-
     return pvalue, round(coef, 3), ci1,ci2
 
 def subsectionFam(dataframe, famfile, datatype):
@@ -249,11 +248,9 @@ def obt_haplo_hard(aadf):
             refAA = refcol
             AAcount = 2
         else:
-            #print(aalist, aadf.AA_ID.values)
-
             aalist.append("missing")
             haplocount = haplodf.shape[1]
-            refAA = aalist[0]
+            refAA = "missing"#aalist[0]
             AAcount = 0
 
     return haplodf, AAcount, refAA, aalist, haplocount
@@ -283,10 +280,10 @@ def obt_haplo_soft(aadf, infodf):
 
         suffix = aadf.index[0].split("_")[-1]
         if len(suffix) == 1:
-            refAA = suffix
+            refAA = "missing"
             aalist = [suffix,"missing"]
         else:
-            refAA = infodf["alleleA"].values[0]
+            refAA = infodf["alleleB"].values[0] ## that means allele A is the minor/effect allele in the model
             aalist = infodf[["alleleA", "alleleB"]].values[0]
         haplocount = haplodf.shape[1]
 
@@ -312,7 +309,7 @@ def processAnalysisInput_(data, info, famfile, datatype):
 
     return data, info, fam, variants
 
-def analyseAA(hladat, famfile, modeltype):
+def analyseAA(hladat, famfile, modeltype, covar=None):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models/omnibus test using the appropriate `modeltype`
 
@@ -324,6 +321,8 @@ def analyseAA(hladat, famfile, modeltype):
         the sample information file to include covariates such as sex.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
     Returns
     ------------
     output: pandas DataFrame
@@ -345,7 +344,12 @@ def analyseAA(hladat, famfile, modeltype):
             haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
 
         ### building abt
-        abt = pd.concat([haplodf, fam], axis=1)
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]            
+            abt = pd.concat([haplodf, covarDf, fam], axis=1)
+        else:
+            abt = pd.concat([haplodf, fam], axis=1)
 
         ### Perform omnibus test if at least 3 amino acids
         if AAcount>2:
@@ -391,7 +395,7 @@ def analyseAA(hladat, famfile, modeltype):
 
     return output
 
-def analyseSNP(hladat, famfile, modeltype):
+def analyseSNP(hladat, famfile, modeltype, covar=None):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`
 
@@ -403,6 +407,8 @@ def analyseSNP(hladat, famfile, modeltype):
         the sample information file to include covariates such as sex.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
     Returns
     ------------
     output: pandas DataFrame
@@ -426,7 +432,12 @@ def analyseSNP(hladat, famfile, modeltype):
 
         nu_snpdf.columns = ["snp_{}".format(col) for col in nu_snpdf.columns]
         ### building abt
-        abt = pd.concat([nu_snpdf, fam], axis=1)
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]
+            abt = pd.concat([nu_snpdf, covarDf, fam], axis=1)
+        else:
+            abt = pd.concat([nu_snpdf, fam], axis=1)
         ### run analysis
         if AAcount == 2:
             uni_p, coef, conf_int1, conf_int2 = linear_model(abt, modeltype)
@@ -443,7 +454,7 @@ def analyseSNP(hladat, famfile, modeltype):
 
     return output
 
-def analyseHLA(hladat, famfile, modeltype):
+def analyseHLA(hladat, famfile, modeltype, covar=None):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`
 
@@ -455,6 +466,8 @@ def analyseHLA(hladat, famfile, modeltype):
         the sample information file to include covariates such as sex.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
     Returns
     ------------
     output: pandas DataFrame
@@ -477,7 +490,12 @@ def analyseHLA(hladat, famfile, modeltype):
 
         nu_hladf.columns = ["hla_{}".format(col) for col in nu_hladf.columns]
         ### building abt
-        abt = pd.concat([nu_hladf, fam], axis=1)
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]
+            abt = pd.concat([nu_hladf, covarDf, fam], axis=1)
+        else:
+            abt = pd.concat([nu_hladf, fam], axis=1)
         ### run analysis
         uni_p, coef, conf_int1, conf_int2  = linear_model(abt, modeltype)
 
