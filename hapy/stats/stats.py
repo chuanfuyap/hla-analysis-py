@@ -7,7 +7,8 @@ Currently supports:
 """
 __all__ = ["analyseAA", "analyseSNP", "analyseHLA"]
 from collections import Counter
-from re import L
+from itertools import product
+
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -347,7 +348,7 @@ def analyseAA(hladat, famfile, modeltype, covar=None):
         ### building abt
         if covar:
             covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]            
+            covarDf = covarDf.loc[fam.index]
             abt = pd.concat([haplodf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([haplodf, fam], axis=1)
@@ -684,7 +685,6 @@ def interaction_linear_model(dataframe, model):
     abt = dataframe.copy()
     f = "PHENOTYPE ~ C(SEX) +"+"*".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
 
-    
     if model.lower()=="logit":
         model = smf.glm(formula = str(f), data = abt, family=sm.families.Binomial()).fit(disp=0)
     else: ## else it is a linear model
@@ -739,3 +739,101 @@ def interaction_obt(dataframe, haplotypenumber, model):
 
 def interaction_testAA():
     pass
+
+def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
+    """
+    Goes through all the combinations in both SNPsdf and HLA genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`.
+
+    Parameters
+    ------------
+    SNPsdf: pandas DataFrame,
+        the genotype file containing snps copy number in additive genetic model format, row is sample ID, columns is SNP ID
+    HLAdf: pandas DataFrame,
+        the genotype file containing HLA-4Digit allele copy number in additive genetic model format, row is sample ID, columns is HLA ID
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex, row is sample ID, and columns are the covariates
+        NOTE: SEX and PHENOTYPE should be at the final 2 columns.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+
+    ### building interaction pairs between TCR SNPs and HLA alleles
+    snp = list(SNPsdf.columns)
+    hla = list(HLAdf.columns)
+    TCR = SNPsdf.copy()
+    HLA = HLAdf.copy()
+    abt = pd.concat([TCR, HLA], axis=1)
+
+    interactions = list(product(snp, hla))
+
+    ## recodes PLINK's phenotype and sex information
+    fam = famfile.copy()
+    fam.PHENOTYPE = fam.PHENOTYPE.map({2:1, 1:0})
+    fam.SEX = fam.SEX.map({2:"female", 1:"male"})
+
+    abt = subsectionFam(abt, fam, "hardcall")
+
+    ## for the output dataframe
+    colnames = ["TCR_variant", "HLA_variant", "I_p-value", "I_coefficient", "CI_0.025", "CI_0.975",
+                "tcr_p-value", "tcr_coefficient", "tcr_CI_0.025", "tcr_CI_0.975",
+                "hla_p-value", "hla_coefficient", "hla_CI_0.025", "hla_CI_0.975"]
+    output = pd.DataFrame(columns=colnames)
+
+    for pair in interactions:
+        tmpdf = abt[list(pair)]
+        tcr_snp = pair[0]
+        hla_4dig = pair[1]
+
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]
+            tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
+        else:
+            tmpdf = pd.concat([tmpdf, fam], axis=1)
+
+        model = interaction_linear_model(tmpdf, modeltype)
+        ip, ic, ici1, ici2 = get_results(model,":".join([tcr_snp, hla_4dig]))
+        tp, tc, tci1, tci2 = get_results(model, tcr_snp)
+        hp, hc, hci1, hci2 = get_results(model, hla_4dig)
+
+        output = output.append({"TCR_variant":tcr_snp,
+                                "HLA_variant": hla_4dig,
+                                "I_p-value": ip, "I_coefficient": ic,
+                                "CI_0.025": ici1, "CI_0.975": ici2,
+                                "tcr_p-value": tp, "tcr_coefficient": tc,
+                                "tcr_CI_0.025": tci1,  "tcr_CI_0.975": tci2,
+                                "hla_p-value": hp, "hla_coefficient": hc,
+                                "hla_CI_0.025": hci1, "hla_CI_0.975": hci2},
+                                    ignore_index=True)
+
+    return output
+
+
+def get_results(model, allele_info):
+    """
+    Extracts results output for dataframe.
+
+    Parameters
+    ------------
+    model: statsmodels
+        statsmodels results object
+    model: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    pvalue: float
+        p-value
+    coef: float
+        regression coefficient (effect size of the genotype on phenotype)
+    """
+    pvalue = model.pvalues[allele_info]
+    coef = model.params[allele_info]
+    ci1,ci2 = model.conf_int().loc[allele_info, 0], model.conf_int().loc[allele_info, 1]
+
+    return pvalue, coef, ci1, ci2
