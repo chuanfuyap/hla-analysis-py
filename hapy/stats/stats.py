@@ -7,6 +7,7 @@ Currently supports:
 """
 __all__ = ["analyseAA", "analyseSNP", "analyseHLA"]
 from collections import Counter
+from re import L
 import pandas as pd
 import numpy as np
 import statsmodels.api as sm
@@ -662,3 +663,79 @@ def getRefAA(haplo, aalist):
     aminoacids = checkAAblock(aminoacids)
 
     return aminoacids
+
+### new section for interaction models
+def interaction_linear_model(dataframe, model):
+    """
+    Fit linear model given dataframe (abt) of features (gene copy number/probability) and target (phenotype)
+    Parameters
+    ------------
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
+    model: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    pvalue: float
+        p-value
+    coef: float
+        regression coefficient (effect size of the genotype on phenotype)
+    """
+    abt = dataframe.copy()
+    f = "PHENOTYPE ~ C(SEX) +"+"*".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
+
+    
+    if model.lower()=="logit":
+        model = smf.glm(formula = str(f), data = abt, family=sm.families.Binomial()).fit(disp=0)
+    else: ## else it is a linear model
+        model = smf.ols(formula = str(f), data = abt).fit()
+
+    return model
+
+def interaction_obt(dataframe, haplotypenumber, model):
+    """
+    Performs omnibustest for interaction analysis
+
+    Parameters
+    ------------
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
+    haplotypenumber: int
+        number of haplotypes in the design matrix, used to subsection out covariates.
+    model: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    Returns
+    ------------
+    test: float
+        test statistic
+    p: float
+        p-value from the significance testing (<0.05 for altmodel to be significantly better)
+    """
+    abt = dataframe.copy()
+    ### -2 is because the abt is usually structured as GENOTYPE in the first columns then last 2 are SEX then PHENOTYPE
+    altf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[:-2])
+    ### IN CASE OF CONDITIONING IS DONE
+    ### haplotypenumber would count up all columns of GENOTYPE, and -2 would remove SEX AND PHENOTYPE, anything in between should be extra covariates desired to be modelled.
+    if len(abt.columns[haplotypenumber:-2])>0:
+        nullf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[haplotypenumber:-2])
+    else:
+        nullf = "PHENO ~ C(SEX)"
+
+    if model.lower()=="logit":
+        alt_model = smf.glm(formula = str(altf), data = abt, family=sm.families.Binomial()).fit(disp=0)
+        null_model = smf.glm(formula = str(nullf), data = abt, family=sm.families.Binomial()).fit(disp=0)
+    else:
+        alt_model = smf.ols(formula = str(altf), data = abt).fit()
+        null_model = smf.ols(formula = str(nullf), data = abt).fit()
+
+    lrstat, lrp = lrtest(null_model, alt_model)
+    fstat, fp = anova(null_model, alt_model, abt.PHENO, model)
+
+    coefs = []
+    for col in abt.columns[:haplotypenumber]:
+        coefs.append(round(alt_model.params[col],3))
+
+    return lrstat, lrp, fstat, fp, coefs
+
+def interaction_testAA():
+    pass
