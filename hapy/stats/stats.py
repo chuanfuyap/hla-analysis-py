@@ -666,7 +666,7 @@ def getRefAA(haplo, aalist):
     return aminoacids
 
 ### new section for interaction models
-def interaction_linear_model(dataframe, model):
+def interaction_linear_model(dataframe, model, snpnames):
     """
     Fit linear model given dataframe (abt) of features (gene copy number/probability) and target (phenotype)
     Parameters
@@ -683,7 +683,9 @@ def interaction_linear_model(dataframe, model):
         regression coefficient (effect size of the genotype on phenotype)
     """
     abt = dataframe.copy()
-    f = "PHENOTYPE ~ C(SEX) +"+"*".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
+    f = "PHENOTYPE ~ C(SEX) +"+"+".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
+    print(f)
+    f += "+{}:{}".format(snpnames[0], snpnames[1])
 
     if model.lower()=="logit":
         model = smf.glm(formula = str(f), data = abt, family=sm.families.Binomial()).fit(disp=0)
@@ -692,7 +694,7 @@ def interaction_linear_model(dataframe, model):
 
     return model
 
-def interaction_obt(dataframe, haplotypenumber, model):
+def interaction_obt(dataframe, model, tcr, aa_list):
     """
     Performs omnibustest for interaction analysis
 
@@ -712,14 +714,16 @@ def interaction_obt(dataframe, haplotypenumber, model):
         p-value from the significance testing (<0.05 for altmodel to be significantly better)
     """
     abt = dataframe.copy()
-    ### -2 is because the abt is usually structured as GENOTYPE in the first columns then last 2 are SEX then PHENOTYPE
-    altf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[:-2])
-    ### IN CASE OF CONDITIONING IS DONE
-    ### haplotypenumber would count up all columns of GENOTYPE, and -2 would remove SEX AND PHENOTYPE, anything in between should be extra covariates desired to be modelled.
-    if len(abt.columns[haplotypenumber:-2])>0:
-        nullf = "PHENO ~ C(SEX) +"+"+".join(abt.columns[haplotypenumber:-2])
-    else:
-        nullf = "PHENO ~ C(SEX)"
+    ### -2 would remove SEX AND PHENOTYPE, anything in between should be extra covariates and GENOTYPE desired to be modelled.
+    nullf = "PHENOTYPE ~ C(SEX) +"+"+".join(abt.columns[:-2])
+
+    ## adding interaction terms
+    interaction_terms = ""
+    for aa_allele in aa_list:
+        interaction_terms+= "+{}:{}".format(tcr, aa_allele)
+
+    altf = nullf
+    altf += interaction_terms
 
     if model.lower()=="logit":
         alt_model = smf.glm(formula = str(altf), data = abt, family=sm.families.Binomial()).fit(disp=0)
@@ -729,16 +733,111 @@ def interaction_obt(dataframe, haplotypenumber, model):
         null_model = smf.ols(formula = str(nullf), data = abt).fit()
 
     lrstat, lrp = lrtest(null_model, alt_model)
-    fstat, fp = anova(null_model, alt_model, abt.PHENO, model)
+    fstat, fp = anova(null_model, alt_model, abt.PHENOTYPE, model)
 
-    coefs = []
-    for col in abt.columns[:haplotypenumber]:
-        coefs.append(round(alt_model.params[col],3))
+    return lrstat, lrp, fstat, fp
 
-    return lrstat, lrp, fstat, fp, coefs
+def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
+    """
+    Goes through all the combinations in both SNPsdf and HLA amino acid and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype` if there are multiple amino acids in the same position, likelihood ratio test is used to determined interaction improves the model with a p-value.
 
-def interaction_testAA():
-    pass
+    Parameters
+    ------------
+    SNPsdf: pandas DataFrame,
+        the genotype file containing snps copy number in additive genetic model format, row is sample ID, columns is SNP ID
+        This can be generated using PLINK --recode A flag to generate `.raw` file which would be suitable for this (one of the FID/IID has to be dropped.)
+    AAdf: pandas DataFrame,
+        the genotype file containing amino acid file from phased beagle file.
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex, row is sample ID, and columns are the covariates
+        NOTE: SEX and PHENOTYPE should be at the final 2 columns.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+
+    colnames = ["TCR_variant", "HLA_AA_variant", "I_p-value","Anova_p", "Amino_Acids", "Ref_AA"]
+    output = pd.DataFrame(columns=colnames)
+
+    df = AAdf.copy()
+
+    df["AA_ID"] = [("_").join(ix.split("_")[:4]) for ix in df.index]
+
+    aminoacids = df.AA_ID.unique()
+
+    TCR = SNPsdf.copy()
+    fam = famfile.copy()
+    fam.PHENOTYPE = fam.PHENOTYPE.map({2:1, 1:0})
+    fam.SEX = fam.SEX.map({2:"female", 1:"male"})
+
+    for aa in aminoacids[:15]:
+        aadf = df[df.AA_ID==aa]
+        haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
+
+        if AAcount >2:
+            colnames = aalist.copy()
+            colnames.remove(refAA)
+            haplodf.columns = colnames
+
+            for tcr_snp in TCR.columns:
+                tmpdf = pd.DataFrame(TCR[tcr_snp])
+                tmpdf = pd.concat([tmpdf, haplodf], axis=1)
+                ## checking for covariates
+                if covar:
+                    covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+                    covarDf = covarDf.loc[fam.index] ## to subsection
+                    tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
+                else:
+                    tmpdf = pd.concat([tmpdf, fam], axis=1)
+
+                _,lrp,_,anovap = interaction_obt(tmpdf, "logit", tcr_snp, colnames)
+
+                output = output.append({"TCR_variant":tcr_snp,
+                                "HLA_AA_variant": aa,
+                                "I_p-value": lrp, "Anova_p":anovap,
+                                "Amino_Acids":", ".join(aalist), "Ref_AA":refAA},
+                                    ignore_index=True)
+
+        elif AAcount==2:
+            colnames = aalist.copy()
+            colnames.remove(refAA)
+            haplodf.columns = colnames
+
+            ### joining TCR snps with amino acid df
+            abt = pd.concat([TCR, haplodf], axis=1)
+            interactions = list(product(TCR.columns.values, colnames))
+
+            for pair in interactions:
+                tmpdf = abt[list(pair)]
+
+                ## checking for covariates
+                if covar:
+                    covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+                    covarDf = covarDf.loc[fam.index] ## to subsection
+                    tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
+                else:
+                    tmpdf = pd.concat([tmpdf, fam], axis=1)
+
+                model = interaction_linear_model(tmpdf, modeltype, pair)
+                tcr_snp = pair[0]
+                ip, _,_,_ = get_results(model,":".join(list(pair)))
+
+                output = output.append({"TCR_variant":tcr_snp,
+                                "HLA_AA_variant": aa,
+                                "I_p-value": ip,
+                                "Anova_p":np.nan, "Amino_Acids":", ".join(aalist),
+                                "Ref_AA":refAA},
+                                    ignore_index=True)
+
+    output["GENE"] = output.HLA_AA_variant.apply(lambda x: x.split("_")[1])
+    output["POS"] = output.HLA_AA_variant.apply(lambda x: x.split("_")[2])
+
+    return output
 
 def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
     """
@@ -792,12 +891,12 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
 
         if covar:
             covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+            covarDf = covarDf.loc[fam.index] ## to subsection
             tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
         else:
             tmpdf = pd.concat([tmpdf, fam], axis=1)
 
-        model = interaction_linear_model(tmpdf, modeltype)
+        model = interaction_linear_model(tmpdf, modeltype, pair)
         ip, ic, ici1, ici2 = get_results(model,":".join([tcr_snp, hla_4dig]))
         tp, tc, tci1, tci2 = get_results(model, tcr_snp)
         hp, hc, hci1, hci2 = get_results(model, hla_4dig)
@@ -813,7 +912,6 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
                                     ignore_index=True)
 
     return output
-
 
 def get_results(model, allele_info):
     """
@@ -837,3 +935,4 @@ def get_results(model, allele_info):
     ci1,ci2 = model.conf_int().loc[allele_info, 0], model.conf_int().loc[allele_info, 1]
 
     return pvalue, coef, ci1, ci2
+
