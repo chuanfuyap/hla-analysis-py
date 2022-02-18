@@ -40,6 +40,7 @@ def lrtest(nullmodel, altmodel):
     https://stackoverflow.com/questions/30541543/how-can-i-perform-a-likelihood-ratio-test-on-a-linear-mixed-effect-model
     Theory explained here:
     https://stackoverflow.com/questions/38248595/likelihood-ratio-test-in-python
+    https://www.itl.nist.gov/div898/handbook/apr/section2/apr233.htm
     """
 
     ## Log-likelihood of model
@@ -935,4 +936,3 @@ def get_results(model, allele_info):
     ci1,ci2 = model.conf_int().loc[allele_info, 0], model.conf_int().loc[allele_info, 1]
 
     return pvalue, coef, ci1, ci2
-
