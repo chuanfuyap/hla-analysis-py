@@ -742,6 +742,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
     """
     Goes through all the combinations in both SNPsdf and HLA amino acid and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype` if there are multiple amino acids in the same position, likelihood ratio test is used to determined interaction improves the model with a p-value.
 
+    TODO: fix the input files? OR update how data files process to be coherent with the rest of the package.
     Parameters
     ------------
     SNPsdf: pandas DataFrame,
@@ -765,24 +766,28 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
     colnames = ["TCR_variant", "HLA_AA_variant", "I_p-value","Anova_p", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
 
+    TCR = SNPsdf.copy()
+    ## recodes PLINK's phenotype and sex information
+    fam = famfile.copy()
+    fam.PHENOTYPE = fam.PHENOTYPE.map({2:1, 1:0})
+    fam.SEX = fam.SEX.map({2:"female", 1:"male"})
+
     df = AAdf.copy()
+    df = subsectionFam(df, fam, "hardcall")
+    TCR = subsectionFam(TCR, fam, "hardcall")
 
     df["AA_ID"] = [("_").join(ix.split("_")[:4]) for ix in df.index]
 
     aminoacids = df.AA_ID.unique()
 
-    TCR = SNPsdf.copy()
-    fam = famfile.copy()
-    fam.PHENOTYPE = fam.PHENOTYPE.map({2:1, 1:0})
-    fam.SEX = fam.SEX.map({2:"female", 1:"male"})
-
-    for aa in aminoacids[:15]:
+    for aa in aminoacids:
         aadf = df[df.AA_ID==aa]
         haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
 
         if AAcount >2:
             colnames = aalist.copy()
             colnames.remove(refAA)
+            colnames = ["AA_{}".format(col.replace(".", "dot").replace("*", "asterisk")) for col in colnames]
             haplodf.columns = colnames
 
             for tcr_snp in TCR.columns:
@@ -807,6 +812,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
         elif AAcount==2:
             colnames = aalist.copy()
             colnames.remove(refAA)
+            colnames = ["AA_{}".format(col.replace(".", "dot").replace("*", "asterisk")) for col in colnames]
             haplodf.columns = colnames
 
             ### joining TCR snps with amino acid df
@@ -843,7 +849,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
 def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
     """
     Goes through all the combinations in both SNPsdf and HLA genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`.
-
+    TODO: fix the input files? OR update how data files process to be coherent with the rest of the package.
     Parameters
     ------------
     SNPsdf: pandas DataFrame,
