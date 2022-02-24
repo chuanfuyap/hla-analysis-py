@@ -14,6 +14,7 @@ from itertools import product
 
 import pandas as pd
 import numpy as np
+from psutil import NIC_DUPLEX_FULL
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
@@ -1061,6 +1062,48 @@ def survivalHLA(hladat, famfile, event_time, covar=None):
 
     return output.sort_values("p-value")
 
+def survival_obt(dataframe, amino_acids):
+    """
+    Performs omnibustest as called by for survival analysis, used when there are multiple amino acids in the same position. 
+
+    Parameters
+    ------------
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
+    amino_acids: list
+        list of amino acids being tested in the position
+    Returns
+    ------------
+    test: float
+        test statistic
+    p: float
+        p-value from the significance testing (<0.05 for altmodel to be significantly better)
+    """
+    abt = dataframe.copy()
+    
+    cph = CoxPHFitter()
+    ## extended/alternative model with everything
+    alt_model = cph.fit(abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
+
+    ## building null/restricted model where amino acids are being dropped and keeping only covariates. 
+    nullcolumns = list(abt.columns)
+    for col in amino_acids:
+        nullcolumns.remove(col)
+    null_abt = abt[nullcolumns]
+    null_model = cph.fit(null_abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
+
+    ## Log-likelihood of model
+    alt_llf = alt_model.log_likelihood_
+    null_llf = null_model.log_likelihood_
+    ## since they are log-transformed, division is subtraction. So this is the ratio
+    lr = 2 * (alt_llf - null_llf)
+    ## normal formula for this is (-2*log(null/alt)), but since llf is already log-transformed it is the above, and since we put alt model infront, we don't need the negative sign.
+
+    dof = len(amino_acids)
+
+    p = stats.chi2.sf(lr, dof)
+    return lr, p
+
 def survivalAA(hladat, famfile, event_time, covar=None):
     """
     Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models/omnibus test using the appropriate `modeltype`
@@ -1109,12 +1152,7 @@ def survivalAA(hladat, famfile, event_time, covar=None):
 
         ### Perform omnibus test if at least 3 amino acids
         if AAcount>2:
-            print(cox_abt.columns)
-            print(haplodf.columns)
-            print(aa_columns)
-            #_,lrp, _, _, multicoef = obt(abt, haplocount, _)
-            #multicoef = [str(x) for x in multicoef]
-            #multicoef = ", ".join(multicoef)
+            _,lrp = survival_obt(cox_abt, aa_columns)
 
             uni_p = np.nan
             coef = np.nan
