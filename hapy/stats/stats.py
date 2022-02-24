@@ -4,8 +4,11 @@ Functions built for analysis:
 Currently supports:
 - Linear model and omnibus test for HLA amino acids with beagle files as input.
 
+TODO: investigate redundancy in code regarding minor allele filtering.
+
 """
-__all__ = ["analyseAA", "analyseSNP", "analyseHLA"]
+__all__ = ["analyseAA", "analyseSNP", "analyseHLA", "survivalHLA",  "survivalAA", "processAnalysisInput_"]
+
 from collections import Counter
 from itertools import product
 
@@ -16,6 +19,7 @@ import statsmodels.formula.api as smf
 
 from scipy import stats
 from sklearn.metrics import log_loss
+from lifelines import CoxPHFitter
 
 def lrtest(nullmodel, altmodel):
     """
@@ -279,16 +283,26 @@ def obt_haplo_soft(aadf, infodf):
     else:
         haplodf = aadf.drop("AA_ID", axis=1).T
         haplodf.columns = ["solo_amino_acid"]
-        AAcount = 2
 
-        suffix = aadf.index[0].split("_")[-1]
-        if len(suffix) == 1:
-            refAA = "missing"
-            aalist = [suffix,"missing"]
+        freq = haplodf.sum(0)/(haplodf.shape[0]*2)
+        freq = freq.values[0]
+        if (freq > 0.01) and (freq < 0.99):
+            AAcount = 2
+
+            suffix = aadf.index[0].split("_")[-1]
+            if len(suffix) == 1:
+                refAA = "missing"
+                aalist = [suffix,"missing"]
+            else:
+                refAA = infodf["alleleB"].values[0] ## that means allele A is the minor/effect allele in the model
+                aalist = infodf[["alleleA", "alleleB"]].values[0]
+            haplocount = haplodf.shape[1]
+
         else:
-            refAA = infodf["alleleB"].values[0] ## that means allele A is the minor/effect allele in the model
-            aalist = infodf[["alleleA", "alleleB"]].values[0]
-        haplocount = haplodf.shape[1]
+            AAcount=0
+            refAA=infodf["alleleB"].values[0] ## that means allele A is the minor/effect allele in the model
+            aalist=infodf[["alleleA", "alleleB"]].values[0]
+            haplocount=haplodf.shape[1]
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
@@ -483,7 +497,7 @@ def analyseHLA(hladat, famfile, modeltype, covar=None):
 
     for x in hla:
         ### sectioning out singular gene amino acid position and making haplotype matrix
-        hladf = df[df.AA_ID==x]
+        hladf = df[df.AA_ID==x] ## might be redundant... TODO: remove redundancy?
         hlainfo = info[info.AA_ID==x]
 
         if hladat.type == "softcall":
@@ -557,6 +571,10 @@ def makehaplodf(aa_df, basicQC=True):
         highfreq = highfreq[highfreq]
         df=df[highfreq.index]
 
+        highfreq2 = df.sum(0)/2/df.shape[0] < 0.99
+        highfreq2 = highfreq2[highfreq2]
+        df=df[highfreq2.index]
+
     haplo = df.columns
     aminoacids = get_aminoacids(aminoacids, haplo)
 
@@ -595,8 +613,13 @@ def makehaploprob(aa_df, basicQC=True):
     if basicQC:
         highfreq = df.sum(0)/(df.shape[0]*2) > 0.01
         highfreq = highfreq[highfreq]
-
+        
         df=df[highfreq.index]
+        
+        highfreq2 = df.sum(0)/(df.shape[0]*2) < 0.99
+        highfreq2 = highfreq2[highfreq2]
+
+        df=df[highfreq2.index]
 
     return df.sort_index()
 
@@ -942,3 +965,184 @@ def get_results(model, allele_info):
     ci1,ci2 = model.conf_int().loc[allele_info, 0], model.conf_int().loc[allele_info, 1]
 
     return pvalue, coef, ci1, ci2
+
+def survival_model(dataframe, variant):
+    """
+    Fit Cox proportional hazard regression model given dataframe (abt) of features (gene copy number/probability), duration (time) and target (event)
+
+    Parameters
+    ------------
+    dataframe: Pandas DataFrame
+        the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
+    variant: str
+        variant being tested for association in the survival regression
+
+    Returns
+    ------------
+    pvalue: float
+        p-value
+
+    coef: float
+        regression coefficient (effect size of the genotype on phenotype)
+    """
+    abt = dataframe.copy()
+
+    cph = CoxPHFitter()
+    model = cph.fit(abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
+
+    pvalue = model.summary.loc[variant, "p"]
+    coef = model.summary.loc[variant, "exp(coef)"]
+    ci1,ci2 = model.summary.loc[variant, "exp(coef) lower 95%"], model.summary.loc[variant, "exp(coef) upper 95%"]
+    return pvalue, round(coef, 3), round(ci1, 3),round(ci2, 3)
+
+def survivalHLA(hladat, famfile, event_time, covar=None):
+    """
+    Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype`
+
+    NOTE: this function is only tested on "softcall" data type, testing is not done for "hardcall" data type
+    Parameters
+    ------------
+    dataframe: pandas DataFrame,
+        the genotype file containing either copy number or probability (dosage)
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    event_time: pandas DataFrame
+        the dataset containing the duration/time and event column as well as sample_id column so it can be matched to genotype and famile.
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+    df, info, fam, hla = processAnalysisInput_(hladat.HLA.data, hladat.HLA.info, famfile, hladat.type)
+
+    if 2 in fam.SEX.unique():
+        fam.SEX = fam.SEX.map({1:0, 2:1})
+
+    colnames = ["VARIANT", "GENE", "POS", "p-value", "Hazard_Ratio", "CI_0.025", "CI_0.975"]
+    output = pd.DataFrame(columns=colnames)
+
+    for x in hla:
+        ### sectioning out singular gene amino acid position and making haplotype matrix
+        hladf = df[df.AA_ID==x] ## might be redundant... TODO: remove redundancy?
+        hlainfo = info[info.AA_ID==x]
+
+        if hladat.type == "softcall":
+            nu_hladf = hladf.drop(columns=['AA_ID'], axis=1).T.sort_index()
+        elif hladat.type == "hardcall":
+            nu_hladf, _, _, _, _ = obt_haplo_hard(hladf)
+
+        nu_hladf.columns = ["hla_{}".format(col) for col in nu_hladf.columns]
+        ### building abt
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]
+            abt = pd.concat([nu_hladf, covarDf, fam], axis=1)
+        else:
+            abt = pd.concat([nu_hladf, fam], axis=1)
+
+        abt = abt.reset_index().rename(columns={"index":"sample_id"}).drop("PHENO", axis=1)
+        cox_abt = pd.merge(event_time, abt, on="sample_id")
+
+        uni_p, coef, conf_int1, conf_int2  = survival_model(cox_abt, "hla_{}".format(x))
+
+        output = output.append({"VARIANT":hladf.AA_ID.unique()[0],
+                                "GENE":hlainfo.GENE.unique()[0],
+                                "POS":hlainfo.POS.unique()[0],
+                                "p-value": uni_p,
+                                "Hazard_Ratio": coef,
+                                "CI_0.025": conf_int1,
+                                "CI_0.975": conf_int2},
+                                ignore_index=True)
+
+    return output.sort_values("p-value")
+
+def survivalAA(hladat, famfile, event_time, covar=None):
+    """
+    Goes through all the variants in the given genotype file (dataframe) and build a abt with `famfile` which is then analysed using linear models/omnibus test using the appropriate `modeltype`
+
+    Parameters
+    ------------
+    dataframe: pandas DataFrame,
+        the genotype file containing either copy number or probability (dosage)
+    famfile: pandas DataFrame
+        the sample information file to include covariates such as sex.
+    modeltype: str
+        model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
+    covar: pandas DataFrame,
+        a dataframe with matching sample IDs as index and columns for covariates.
+    Returns
+    ------------
+    output: pandas DataFrame
+        the output table containing p-values, coefficients for all the variants tested.
+    """
+    df, info, fam, aminoacids = processAnalysisInput_(hladat.AA.data, hladat.AA.info, famfile, hladat.type)
+
+    colnames = ["VARIANT", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
+    output = pd.DataFrame(columns=colnames)
+
+    for x in aminoacids:
+        ### sectioning out singular gene amino acid position and making haplotype matrix
+        aadf = df[df.AA_ID==x]
+        aainfo = info[info.AA_ID==x]
+
+        if hladat.type == "softcall":
+            haplodf, AAcount, refAA, aalist, _ = obt_haplo_soft(aadf, aainfo)
+        elif hladat.type == "hardcall":
+            haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
+
+        ### building abt
+        if covar:
+            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+            covarDf = covarDf.loc[fam.index]
+            abt = pd.concat([haplodf, covarDf, fam], axis=1)
+        else:
+            abt = pd.concat([haplodf, fam], axis=1)
+
+        abt = abt.reset_index().rename(columns={"index":"sample_id"}).drop("PHENO", axis=1)
+        cox_abt = pd.merge(event_time, abt, on="sample_id")
+
+        ### Perform omnibus test if at least 3 amino acids
+        if AAcount>2:
+            pass
+            #_,lrp, _, _, multicoef = obt(abt, haplocount, _)
+            #multicoef = [str(x) for x in multicoef]
+            #multicoef = ", ".join(multicoef)
+
+            #uni_p = np.nan
+            #coef = np.nan
+
+        ### Perform univariate test between 2 amino acids
+        elif AAcount==2:
+            uni_p, coef, _, _  = survival_model(cox_abt, abt.columns[1])
+
+            lrp = np.nan
+            multicoef = np.nan
+
+        else: ## nothing done
+            lrp = np.nan
+            uni_p = np.nan
+            refAA = np.nan
+            coef = np.nan
+            multicoef = np.nan
+            #print("please investigate: {}".format(x))
+
+        aalist = [str(x) for x in aalist]
+        aalist = ", ".join(set(aalist))
+        output = output.append({"VARIANT":aadf.AA_ID.unique()[0],
+                                "GENE":aainfo.GENE.unique()[0],
+                                "AA_POS":aainfo.AA_POS.unique()[0],
+                                "LR_p": lrp,
+                                "multi_Coef": multicoef,
+                                "Uni_p": uni_p,
+                                "Uni_Coef": coef,
+                                "Amino_Acids": aalist,
+                                "Ref_AA": refAA},
+                                ignore_index=True)
+
+    output["LRp_Unip"] = output[["LR_p","Uni_p"]].fillna(0).sum(1).replace(0, np.nan)
+
+    return output

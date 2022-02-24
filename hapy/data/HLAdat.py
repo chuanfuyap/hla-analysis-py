@@ -146,6 +146,7 @@ class HLAdata:
         ### QC allele frequency
         maf = df.apply(lambda x: x.value_counts(normalize=True).values.min(), axis=1)
         df = df.loc[maf>allelefilter]
+        df = df.loc[maf<(1-allelefilter)]
 
         return df
 
@@ -162,6 +163,8 @@ class HLAdata:
         ### QC allele frequency
         highfreqallele = (df=="T").sum(1)/df.shape[1] > allelefilter
         df = df.loc[highfreqallele]
+        highfreqallele2 = (df=="T").sum(1)/df.shape[1] < (1-allelefilter)
+        df = df.loc[highfreqallele2]
 
         return df
 
@@ -199,6 +202,9 @@ class HLAdata:
 
         highfreqallele = df.sum(1)/(df.shape[1]*2) > alellefilter
         df = df.loc[highfreqallele]
+
+        highfreqallele2 = df.sum(1)/(df.shape[1]*2) < (1-alellefilter)
+        df = df.loc[highfreqallele2]
 
         return df
 
