@@ -14,7 +14,6 @@ from itertools import product
 
 import pandas as pd
 import numpy as np
-from psutil import NIC_DUPLEX_FULL
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
@@ -710,7 +709,7 @@ def interaction_linear_model(dataframe, model, snpnames):
     """
     abt = dataframe.copy()
     f = "PHENOTYPE ~ C(SEX) +"+"+".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
-    print(f)
+
     f += "+{}:{}".format(snpnames[0], snpnames[1])
 
     if model.lower()=="logit":
@@ -1084,17 +1083,18 @@ def survival_obt(dataframe, amino_acids):
     cph = CoxPHFitter()
     ## extended/alternative model with everything
     alt_model = cph.fit(abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
+    alt_llf = alt_model.log_likelihood_
 
     ## building null/restricted model where amino acids are being dropped and keeping only covariates. 
+    cph = CoxPHFitter()
     nullcolumns = list(abt.columns)
     for col in amino_acids:
         nullcolumns.remove(col)
     null_abt = abt[nullcolumns]
     null_model = cph.fit(null_abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
-
-    ## Log-likelihood of model
-    alt_llf = alt_model.log_likelihood_
     null_llf = null_model.log_likelihood_
+
+    ## Likelihood Ratio Test
     ## since they are log-transformed, division is subtraction. So this is the ratio
     lr = 2 * (alt_llf - null_llf)
     ## normal formula for this is (-2*log(null/alt)), but since llf is already log-transformed it is the above, and since we put alt model infront, we don't need the negative sign.
@@ -1125,9 +1125,8 @@ def survivalAA(hladat, famfile, event_time, covar=None):
     """
     df, info, fam, aminoacids = processAnalysisInput_(hladat.AA.data, hladat.AA.info, famfile, hladat.type)
 
-    colnames = ["VARIANT", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
+    colnames = ["VARIANT", "GENE", "AA_POS", "LR_p","Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
-
     for x in aminoacids:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         aadf = df[df.AA_ID==x]
@@ -1162,14 +1161,12 @@ def survivalAA(hladat, famfile, event_time, covar=None):
             uni_p, coef, _, _  = survival_model(cox_abt, abt.columns[1])
 
             lrp = np.nan
-            multicoef = np.nan
 
         else: ## nothing done
             lrp = np.nan
             uni_p = np.nan
             refAA = np.nan
             coef = np.nan
-            multicoef = np.nan
             #print("please investigate: {}".format(x))
 
         aalist = [str(x) for x in aalist]
@@ -1178,7 +1175,6 @@ def survivalAA(hladat, famfile, event_time, covar=None):
                                 "GENE":aainfo.GENE.unique()[0],
                                 "AA_POS":aainfo.AA_POS.unique()[0],
                                 "LR_p": lrp,
-                                "multi_Coef": multicoef,
                                 "Uni_p": uni_p,
                                 "Uni_Coef": coef,
                                 "Amino_Acids": aalist,
