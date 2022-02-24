@@ -233,6 +233,7 @@ def obt_haplo_hard(aadf):
             haplocount = haplodf.shape[1]
 
             refAA = "missing"
+            aalist.append("missing")
 
         ### dropping most frequent haplotype as reference
         else:
@@ -613,9 +614,9 @@ def makehaploprob(aa_df, basicQC=True):
     if basicQC:
         highfreq = df.sum(0)/(df.shape[0]*2) > 0.01
         highfreq = highfreq[highfreq]
-        
+
         df=df[highfreq.index]
-        
+
         highfreq2 = df.sum(0)/(df.shape[0]*2) < 0.99
         highfreq2 = highfreq2[highfreq2]
 
@@ -1094,6 +1095,7 @@ def survivalAA(hladat, famfile, event_time, covar=None):
         elif hladat.type == "hardcall":
             haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
 
+        aa_columns = haplodf.columns
         ### building abt
         if covar:
             covarDf = pd.read_csv(covar, index_col=0).fillna(0)
@@ -1107,13 +1109,15 @@ def survivalAA(hladat, famfile, event_time, covar=None):
 
         ### Perform omnibus test if at least 3 amino acids
         if AAcount>2:
-            pass
+            print(cox_abt.columns)
+            print(haplodf.columns)
+            print(aa_columns)
             #_,lrp, _, _, multicoef = obt(abt, haplocount, _)
             #multicoef = [str(x) for x in multicoef]
             #multicoef = ", ".join(multicoef)
 
-            #uni_p = np.nan
-            #coef = np.nan
+            uni_p = np.nan
+            coef = np.nan
 
         ### Perform univariate test between 2 amino acids
         elif AAcount==2:
