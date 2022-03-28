@@ -207,6 +207,7 @@ def subsectionFam(dataframe, famfile, datatype):
     newix = []
 
     if datatype == "softcall":
+        famfile.index = famfile.index.astype("str")
         newix = list(famfile.index)
     elif datatype == "hardcall":
         for x in famfile.index:
@@ -312,6 +313,7 @@ def processAnalysisInput_(data, info, famfile, datatype):
     Summarise analysis Input files for all analyses functions
     """
     data = data.copy()
+    data.index = data.index.astype("str")
     info = info.copy()
 
     fam = famfile.copy()
@@ -791,12 +793,14 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
     output = pd.DataFrame(columns=colnames)
 
     TCR = SNPsdf.copy()
+    TCR.index = TCR.index.astype("str")
     ## recodes PLINK's phenotype and sex information
     fam = famfile.copy()
     fam.PHENOTYPE = fam.PHENOTYPE.map({2:1, 1:0})
     fam.SEX = fam.SEX.map({2:"female", 1:"male"})
 
     df = AAdf.copy()
+    df.columns = df.columns.astype("str")
     df = subsectionFam(df, fam, "hardcall")
     TCR = subsectionFam(TCR, fam, "hardcall")
 
@@ -897,7 +901,9 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
     snp = list(SNPsdf.columns)
     hla = list(HLAdf.columns)
     TCR = SNPsdf.copy()
+    TCR.index = TCR.index.astype("str")
     HLA = HLAdf.copy()
+    HLA.index = HLA.index.astype("str")
     abt = pd.concat([TCR, HLA], axis=1)
 
     interactions = list(product(snp, hla))
@@ -1167,7 +1173,7 @@ def survivalAA(hladat, famfile, event_time, covar=None):
             uni_p = np.nan
             refAA = np.nan
             coef = np.nan
-            #print("please investigate: {}".format(x))
+            print("please investigate: {}".format(aa_columns))
 
         aalist = [str(x) for x in aalist]
         aalist = ", ".join(set(aalist))
