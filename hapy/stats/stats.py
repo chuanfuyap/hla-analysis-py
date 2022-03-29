@@ -168,14 +168,14 @@ def obt(dataframe, haplotypenumber, model):
 
     return lrstat, lrp, fstat, fp, coefs
 
-def linear_model(dataframe, model):
+def linear_model(dataframe, modeltype):
     """
     Fit linear model given dataframe (abt) of features (gene copy number/probability) and target (phenotype)
     Parameters
     ------------
     dataframe: Pandas DataFrame
         the design matrix, genotype and covariates (X) along with the target/phenotype (y) in one table
-    model: str
+    modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
     Returns
     ------------
@@ -188,7 +188,7 @@ def linear_model(dataframe, model):
     abt = dataframe.copy()
     f = "PHENO ~ C(SEX) +"+"+".join(abt.columns[:-2]) ## minus because last 2 columns are sex and pheno
 
-    if model.lower()=="logit":
+    if modeltype.lower()=="logit":
         model = smf.glm(formula = str(f), data = abt, family=sm.families.Binomial()).fit(disp=0)
     else: ## else it is a linear model
         model = smf.ols(formula = str(f), data = abt).fit()
@@ -318,7 +318,7 @@ def processAnalysisInput_(data, info, famfile, datatype):
 
     fam = famfile.copy()
     fam = famfile[["IID","SEX","PHENO"]].set_index("IID")
-    fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK often use 1/2 for phenotype.
+    fam.PHENO = fam.PHENO-1 ## minus 1 since PLINK use 1/2 for phenotype.
     fam = fam.sort_index()
 
     ### for if famfile has less samples than dataframe
@@ -338,7 +338,7 @@ def analyseAA(hladat, famfile, modeltype, covar=None):
     dataframe: pandas DataFrame,
         the genotype file containing either copy number or probability (dosage)
     famfile: pandas DataFrame
-        the sample information file to include covariates such as sex.
+        the sample information file to include covariates such as sex. PHENO data here should be 2/1 as it is in PLINK format.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
     covar: pandas DataFrame,
@@ -424,7 +424,7 @@ def analyseSNP(hladat, famfile, modeltype, covar=None):
     dataframe: pandas DataFrame,
         the genotype file containing either copy number or probability (dosage)
     famfile: pandas DataFrame
-        the sample information file to include covariates such as sex.
+        the sample information file to include covariates such as sex. PHENO data here should be 2/1 as it is in PLINK format.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
     covar: pandas DataFrame,
@@ -483,7 +483,7 @@ def analyseHLA(hladat, famfile, modeltype, covar=None):
     dataframe: pandas DataFrame,
         the genotype file containing either copy number or probability (dosage)
     famfile: pandas DataFrame
-        the sample information file to include covariates such as sex.
+        the sample information file to include covariates such as sex. PHENO data here should be 2/1 as it is in PLINK format.
     modeltype: str
         model type based on the phenotype, either 'logit' (binomial/binary) or 'linear' (continuous)
     covar: pandas DataFrame,
@@ -1069,7 +1069,7 @@ def survivalHLA(hladat, famfile, event_time, covar=None):
 
 def survival_obt(dataframe, amino_acids):
     """
-    Performs omnibustest as called by for survival analysis, used when there are multiple amino acids in the same position. 
+    Performs omnibustest as called by for survival analysis, used when there are multiple amino acids in the same position.
 
     Parameters
     ------------
@@ -1085,7 +1085,7 @@ def survival_obt(dataframe, amino_acids):
         p-value from the significance testing (<0.05 for altmodel to be significantly better)
     """
     abt = dataframe.copy()
-    
+
     cph = CoxPHFitter()
     ## extended/alternative model with everything
     alt_model = cph.fit(abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')

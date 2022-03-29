@@ -5,7 +5,7 @@ from setuptools import find_packages, setup
 ### Haplotype-Analysis
 ### install locally with 'pip install .'
 setup(name="hapy",
-        version="0.1dev1",
+        version="0.1dev2",
         description='Tools to haplotype analysis for genomics studies.',
         author='Chuan Fu Yap',
         author_email='yapchuanfu@gmail.com',
