@@ -7,7 +7,7 @@ Currently supports:
 TODO: investigate redundancy in code regarding minor allele filtering.
 
 """
-__all__ = ["analyseAA", "analyseSNP", "analyseHLA", "survivalHLA",  "survivalAA", "processAnalysisInput_"]
+#__all__ = ["analyseAA", "analyseSNP", "analyseHLA", "survivalHLA",  "survivalAA", "processAnalysisInput_"]
 
 from collections import Counter
 from itertools import product
@@ -353,6 +353,13 @@ def analyseAA(hladat, famfile, modeltype, covar=None):
     colnames = ["VARIANT", "GENE", "AA_POS", "LR_p", "Anova_p", "multi_Coef", "Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     for x in aminoacids:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         aadf = df[df.AA_ID==x]
@@ -364,9 +371,7 @@ def analyseAA(hladat, famfile, modeltype, covar=None):
             haplodf, AAcount, refAA, aalist, haplocount = obt_haplo_hard(aadf)
 
         ### building abt
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+        if "covarDf" in locals():
             abt = pd.concat([haplodf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([haplodf, fam], axis=1)
@@ -439,6 +444,13 @@ def analyseSNP(hladat, famfile, modeltype, covar=None):
     colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975"]
     output = pd.DataFrame(columns=colnames)
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     for x in snps:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         snpdf = df[df.AA_ID==x]
@@ -452,9 +464,7 @@ def analyseSNP(hladat, famfile, modeltype, covar=None):
 
         nu_snpdf.columns = ["snp_{}".format(col) for col in nu_snpdf.columns]
         ### building abt
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+        if "covarDf" in locals():
             abt = pd.concat([nu_snpdf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([nu_snpdf, fam], axis=1)
@@ -498,6 +508,13 @@ def analyseHLA(hladat, famfile, modeltype, covar=None):
     colnames = ["VARIANT", "GENE", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975"]
     output = pd.DataFrame(columns=colnames)
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     for x in hla:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         hladf = df[df.AA_ID==x] ## might be redundant... TODO: remove redundancy?
@@ -510,9 +527,7 @@ def analyseHLA(hladat, famfile, modeltype, covar=None):
 
         nu_hladf.columns = ["hla_{}".format(col) for col in nu_hladf.columns]
         ### building abt
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+        if "covarDf" in locals():
             abt = pd.concat([nu_hladf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([nu_hladf, fam], axis=1)
@@ -710,7 +725,7 @@ def interaction_linear_model(dataframe, model, snpnames):
         regression coefficient (effect size of the genotype on phenotype)
     """
     abt = dataframe.copy()
-    f = "PHENOTYPE ~ C(SEX) +"+"+".join(abt.columns[:2]) ## minus because last 2 columns are sex and pheno
+    f = "PHENOTYPE ~ C(SEX) +"+"+".join(abt.columns[:-2]) ## minus because last 2 columns are sex and pheno
 
     f += "+{}:{}".format(snpnames[0], snpnames[1])
 
@@ -768,7 +783,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
     """
     Goes through all the combinations in both SNPsdf and HLA amino acid and build a abt with `famfile` which is then analysed using linear models using the appropriate `modeltype` if there are multiple amino acids in the same position, likelihood ratio test is used to determined interaction improves the model with a p-value.
 
-    TODO: fix the input files? OR update how data files process to be coherent with the rest of the package.
+    TODO: fix the input files? OR update how data files process to be coherent with the rest of the package. currently subsectionFam works with row as variant column as samples. this requires change for the snp file.
     Parameters
     ------------
     SNPsdf: pandas DataFrame,
@@ -808,6 +823,13 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
 
     aminoacids = df.AA_ID.unique()
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     for aa in aminoacids:
         aadf = df[df.AA_ID==aa]
         haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
@@ -822,9 +844,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
                 tmpdf = pd.DataFrame(TCR[tcr_snp])
                 tmpdf = pd.concat([tmpdf, haplodf], axis=1)
                 ## checking for covariates
-                if covar:
-                    covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-                    covarDf = covarDf.loc[fam.index] ## to subsection
+                if "covarDf" in locals():
                     tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
                 else:
                     tmpdf = pd.concat([tmpdf, fam], axis=1)
@@ -851,9 +871,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
                 tmpdf = abt[list(pair)]
 
                 ## checking for covariates
-                if covar:
-                    covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-                    covarDf = covarDf.loc[fam.index] ## to subsection
+                if "covarDf" in locals():
                     tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
                 else:
                     tmpdf = pd.concat([tmpdf, fam], axis=1)
@@ -896,7 +914,6 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
     output: pandas DataFrame
         the output table containing p-values, coefficients for all the variants tested.
     """
-
     ### building interaction pairs between TCR SNPs and HLA alleles
     snp = list(SNPsdf.columns)
     hla = list(HLAdf.columns)
@@ -915,6 +932,13 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
 
     abt = subsectionFam(abt, fam, "hardcall")
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     ## for the output dataframe
     colnames = ["TCR_variant", "HLA_variant", "I_p-value", "I_coefficient", "CI_0.025", "CI_0.975",
                 "tcr_p-value", "tcr_coefficient", "tcr_CI_0.025", "tcr_CI_0.975",
@@ -926,9 +950,7 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
         tcr_snp = pair[0]
         hla_4dig = pair[1]
 
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index] ## to subsection
+        if "covarDf" in locals():
             tmpdf = pd.concat([tmpdf, covarDf, fam], axis=1)
         else:
             tmpdf = pd.concat([tmpdf, fam], axis=1)
@@ -1032,6 +1054,13 @@ def survivalHLA(hladat, famfile, event_time, covar=None):
     colnames = ["VARIANT", "GENE", "POS", "p-value", "Hazard_Ratio", "CI_0.025", "CI_0.975"]
     output = pd.DataFrame(columns=colnames)
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     for x in hla:
         ### sectioning out singular gene amino acid position and making haplotype matrix
         hladf = df[df.AA_ID==x] ## might be redundant... TODO: remove redundancy?
@@ -1044,9 +1073,7 @@ def survivalHLA(hladat, famfile, event_time, covar=None):
 
         nu_hladf.columns = ["hla_{}".format(col) for col in nu_hladf.columns]
         ### building abt
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+        if "covarDf" in locals():
             abt = pd.concat([nu_hladf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([nu_hladf, fam], axis=1)
@@ -1091,7 +1118,7 @@ def survival_obt(dataframe, amino_acids):
     alt_model = cph.fit(abt.drop("sample_id", axis=1),  duration_col='time', event_col='event')
     alt_llf = alt_model.log_likelihood_
 
-    ## building null/restricted model where amino acids are being dropped and keeping only covariates. 
+    ## building null/restricted model where amino acids are being dropped and keeping only covariates.
     cph = CoxPHFitter()
     nullcolumns = list(abt.columns)
     for col in amino_acids:
@@ -1131,6 +1158,13 @@ def survivalAA(hladat, famfile, event_time, covar=None):
     """
     df, info, fam, aminoacids = processAnalysisInput_(hladat.AA.data, hladat.AA.info, famfile, hladat.type)
 
+    if isinstance(covar, str): ## if string means location of file is provided
+        covarDf = pd.read_csv(covar, index_col=0).fillna(0)
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+    elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
+        covarDf = covar.copy()        
+        covarDf = covarDf.loc[fam.index] ## subsection if possible
+
     colnames = ["VARIANT", "GENE", "AA_POS", "LR_p","Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
     output = pd.DataFrame(columns=colnames)
     for x in aminoacids:
@@ -1145,9 +1179,7 @@ def survivalAA(hladat, famfile, event_time, covar=None):
 
         aa_columns = haplodf.columns
         ### building abt
-        if covar:
-            covarDf = pd.read_csv(covar, index_col=0).fillna(0)
-            covarDf = covarDf.loc[fam.index]
+        if "covarDf" in locals():
             abt = pd.concat([haplodf, covarDf, fam], axis=1)
         else:
             abt = pd.concat([haplodf, fam], axis=1)
