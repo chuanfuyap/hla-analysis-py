@@ -171,8 +171,6 @@ def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
 
     return hladat
 
-
-
 def getSampleIDs(phasedfileloc):
     """
     Extracts sample ID from phased file

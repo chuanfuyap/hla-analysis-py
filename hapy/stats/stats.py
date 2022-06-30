@@ -5,6 +5,7 @@ Currently supports:
 - Linear model and omnibus test for HLA amino acids with beagle files as input.
 
 TODO: investigate redundancy in code regarding minor allele filtering.
+TODO: look into combining analysis functions into class?
 
 """
 #__all__ = ["analyseAA", "analyseSNP", "analyseHLA", "survivalHLA",  "survivalAA", "processAnalysisInput_"]
@@ -357,7 +358,7 @@ def analyseAA(hladat, famfile, modeltype, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     for x in aminoacids:
@@ -441,14 +442,14 @@ def analyseSNP(hladat, famfile, modeltype, covar=None):
     """
     df, info, fam, snps = processAnalysisInput_(hladat.SNP.data, hladat.SNP.info, famfile, hladat.type)
 
-    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975"]
+    colnames = ["VARIANT", "POS", "Uni_p", "Uni_Coef", "CI_0.025", "CI_0.975","SNP_Freq_1", "SNP_Freq_2"]
     output = pd.DataFrame(columns=colnames)
 
     if isinstance(covar, str): ## if string means location of file is provided
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     for x in snps:
@@ -512,7 +513,7 @@ def analyseHLA(hladat, famfile, modeltype, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     for x in hla:
@@ -827,7 +828,7 @@ def interaction_AA(SNPsdf, AAdf, famfile, modeltype, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     for aa in aminoacids:
@@ -936,7 +937,7 @@ def interaction_HLA4digit(SNPsdf, HLAdf, famfile, modeltype, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     ## for the output dataframe
@@ -1058,7 +1059,7 @@ def survivalHLA(hladat, famfile, event_time, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     for x in hla:
@@ -1162,7 +1163,7 @@ def survivalAA(hladat, famfile, event_time, covar=None):
         covarDf = pd.read_csv(covar, index_col=0).fillna(0)
         covarDf = covarDf.loc[fam.index] ## subsection if possible
     elif isinstance(covar, pd.DataFrame): ## else it should be a dataframe
-        covarDf = covar.copy()        
+        covarDf = covar.copy()
         covarDf = covarDf.loc[fam.index] ## subsection if possible
 
     colnames = ["VARIANT", "GENE", "AA_POS", "LR_p","Uni_p", "Uni_Coef", "Amino_Acids", "Ref_AA"]
