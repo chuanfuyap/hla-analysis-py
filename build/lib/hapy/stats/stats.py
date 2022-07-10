@@ -1386,6 +1386,7 @@ def univariate_aminoacid(hladat, famfile, aa_list, modeltype, covar=None, event_
 
         ## this column list is needed to help subset the abt with just a single amino acid.
         abtcolumns.extend(covarDf.columns)
+        print(cox_abt.columns)
         for aa in aalist:
             # this is to isolate single AA
             tmpcolumns = abtcolumns.copy()
