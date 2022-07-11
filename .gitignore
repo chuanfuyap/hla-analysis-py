@@ -1,4 +1,8 @@
 .vscode/
 .DS_Store
-.hapy.egg-info
+hapy.egg-info/
+build/lib/hapy
+build/
+.hapy.egg-info/
+.build/lib/hapy
 .build/
