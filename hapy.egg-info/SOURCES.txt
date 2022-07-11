@@ -1,0 +1,14 @@
+LICENSE
+README.md
+setup.py
+hapy/__init__.py
+hapy.egg-info/PKG-INFO
+hapy.egg-info/SOURCES.txt
+hapy.egg-info/dependency_links.txt
+hapy.egg-info/requires.txt
+hapy.egg-info/top_level.txt
+hapy/data/HLAdat.py
+hapy/data/__init__.py
+hapy/data/io.py
+hapy/stats/__init__.py
+hapy/stats/stats.py

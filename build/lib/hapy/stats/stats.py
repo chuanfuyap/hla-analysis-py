@@ -1317,7 +1317,7 @@ def univariate_aminoacid(hladat, famfile, aa_list, modeltype, covar=None, event_
     """
     Goes through selected list of amino acid positions and analyse them in a univariate fashion with model of choice
     NOTE: this function currently only works for modeltype survival.
-    NOTE: this function is incomplete for snp2hla's dosage file where not all variant IDs store the amino acid.
+    NOTE: this function is incomplete for snp2hla's dosage file where not all variant IDs store the amino acid. 
     Parameters
     ------------
     hladat: pandas DataFrame,
