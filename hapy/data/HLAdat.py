@@ -45,6 +45,7 @@ class HLAdata:
             self.type = data_type # hardcall or probability/dosage
 
     def add_data(self, genomedata, allele_type):
+        #### CONSIDER USING __getitem__ and __setitem__
         """
         Takes respective data (HLA/SNP/AA) and add it to HLAdata object
 

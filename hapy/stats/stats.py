@@ -5,7 +5,7 @@ Currently supports:
 - Linear model and omnibus test for HLA amino acids with beagle files as input.
 
 TODO: investigate redundancy in code regarding minor allele filtering.
-TODO: look into combining analysis functions into class?
+TODO: look into combining analysis functions into class to streamline analysis allowing for other future functions to be added with ease.
 
 """
 #__all__ = ["analyseAA", "analyseSNP", "analyseHLA", "survivalHLA",  "survivalAA", "processAnalysisInput_"]
