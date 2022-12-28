@@ -9,6 +9,6 @@ If there is interest in using the tools, feel free to clone the repository and i
 
 `pip install .`
 
-_Everything works so far but could do with code refactoring._
+_Everything works so far (except plotting, that is work in progress) but could do with code refactoring._
 
 If you need help using this or understanding HLA analysis, feel free to get in touch: chuanfu.yap@manchester.ac.uk 
