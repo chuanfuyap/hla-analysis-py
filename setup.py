@@ -30,7 +30,12 @@ setup(name="hapy",
       author='Chuan Fu Yap',
       author_email='yapchuanfu@gmail.com',
       license='GNU GPLv3',
-      #packages=find_namespace_packages(include=['hapy.data', "hapy.stats","hapy"]),
       packages=find_packages(),
       python_requires='>3.3',
-      install_requires=['pandas', 'numpy', 'scipy', 'statsmodels'])
+      install_requires=[
+        'pandas>=1.0.0,<2.0.0',
+        'numpy>=1.20.0,<2.0.0',
+        'scipy>=1.7.0,<2.0.0',
+        'statsmodels>=0.13.0,<0.14.0',
+        'lifelines>=0.27.0,<0.30.0',
+    ])
