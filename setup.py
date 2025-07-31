@@ -11,9 +11,8 @@ from setuptools import find_packages, setup
 def read(rel_path: str) -> str:
     "reads a txt file"
     here = os.path.abspath(os.path.dirname(__file__))
-    with open(os.path.join(here, rel_path)) as fp:
+    with open(os.path.join(here, rel_path)) as fp: #pylint: disable=W1514
         return fp.read()
-
 
 def get_version(rel_path: str) -> str:
     "read a text file and extract version"
