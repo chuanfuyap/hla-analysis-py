@@ -8,12 +8,14 @@ Currently support:
 Some of the hardcall data processing code adapted from [here](https://github.com/immunogenomics/HLA-TAPAS/blob/master/HLAassoc/run_omnibus_test_WS.R)
 """
 __all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage"]
+from typing import Optional, List
+import time
+
 import pandas as pd
 import numpy as np
-
 from hapy.data.HLAdat import HLAdata
 
-def read_famfile(fileloc):
+def read_famfile(fileloc: str) -> pd.DataFrame:
     """
     Reads PLINK fam file and gives it appropriate headers
 
@@ -26,36 +28,42 @@ def read_famfile(fileloc):
     df: pandas DataFrame
         processed beagle file ready for haplotype matrix generation
     """
-    fam = pd.read_csv(fileloc,
-                    sep=r"\s+", names=["FID", "IID", "FAT", "MOT", "SEX", "PHENO"] ,na_values = [-9,"-9"])
+    fam = pd.read_csv(fileloc,sep=r"\s+", names=["FID", "IID", "FAT", "MOT", "SEX", "PHENO"] ,na_values = [-9,"-9"])
+
     return fam
 
-def read_bgl(fileloc, filterR2=None, simpleQC=True):
+def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
     """
-    Processes Beagle (phased) file and store it as HLAdat object. This gives the hardcall of the variants.
+    Processes Phased Beagle file and store it as HLAdat object. This gives the hardcall of the variants.
 
     Parameters
     ------------
     fileloc: str,
         file location of the beagle (phased) file
-    filterR2: str
+    filter_R2: str
         file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
+    R2_minimum: float
+        minimum R2 value to filter out variants with low imputation quality, default is 0.5
+    simpleQC: bool
+        if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
     Returns
     ------------
     hladat: HLAdat
-        HLAdat object that has dataframe of the genomic data files
+        HLAdat object that has dataframes of the genomic data files
     """
-    print("----------------")
-    print("READING IN DATA")
-    print("----------------")
-    df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=1)#.drop(columns=["I"], axis=1)
+    start = time.time()
+    print("----------------", flush=True)
+    print("READING IN DATA", flush=True)
+    print(f"BGL file:\t{fileloc}", flush=True)
+    print("----------------", flush=True)
+    df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=1)
     markers = df.columns[0]
     df = df[df[markers]=="M"]  #pylint: disable=E1136
     df = df.drop(markers, axis=1)
 
-    if filterR2:
-        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
-        safe = r2[r2[1]>0.5].index
+    if filter_R2:
+        r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>R2_minimum].index
         df = df.loc[safe] #pylint: disable=E1136
 
     df.index.name = "SNP"
@@ -66,38 +74,54 @@ def read_bgl(fileloc, filterR2=None, simpleQC=True):
     df = df.drop(columns=["SNP"], axis=1)
     hladat = HLAdata(df, "hardcall")
     if simpleQC:
-        print("----------------------------------------------------")
-        print("PERFORMING SIMPLE MAF FILTER: droppping 1% allele frequency")
-        print("----------------------------------------------------")
+        print("----------------------------------------------------", flush=True)
+        print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency", flush=True)
+        print("----------------------------------------------------", flush=True)
         hladat.maf_filter()
+
+    end = time.time()
+
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print("---------------------", flush=True)
+    print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
+    print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
+    print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
+    print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
+    print("---------------------", flush=True)    
 
     return hladat
 
-def read_gprobs(fileloc, filterR2=None, simpleQC=True):
+def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
     """
-    Processes Beagle probability (phased) file, transform it into dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
+    Processes Beagle probability file, transform it into dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
     Parameters
     ------------
     fileloc: str,
-        file location of the beagle probability (phased) file
-    filterR2: str
+        file location of the beagle probability file
+    filter_R2: str
         file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
+    R2_minimum: float
+        minimum R2 value to filter out variants with low imputation quality, default is 0.5
+    simpleQC: bool
+        if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
     Returns
     ------------
     hladat: HLAdat
-        HLAdat object that has dataframe of the genomic data files
+        HLAdat object that has dataframes of the genomic data files
     """
-    print("----------------")
-    print("READING IN DATA")
-    print("----------------")
+    start = time.time()
+    print("----------------", flush=True)
+    print("READING IN DATA", flush=True)
+    print(f"GPROB file:\t{fileloc}", flush=True)
+    print("----------------", flush=True)
     df = pd.read_csv(fileloc, sep=r"\s+", header=0, index_col=0)
     namecheck = df.index.name
     assert namecheck == "marker", "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
 
-    if filterR2:
-        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
-        safe = r2[r2[1]>0.5].index
+    if filter_R2:
+        r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>R2_minimum].index
         df = df.loc[safe] #pylint: disable=E1101,E1137
 
     ## gets information from variant ID
@@ -107,20 +131,30 @@ def read_gprobs(fileloc, filterR2=None, simpleQC=True):
     df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
 
     hladat = HLAdata(df, "softcall")
-    print("---------------------")
-    print("CONVERTING TO DOSAGE")
-    print("---------------------")
+    print("---------------------", flush=True)
+    print("CONVERTING TO DOSAGE", flush=True)
+    print("---------------------", flush=True)
     hladat.convert_dosage()
 
     if simpleQC:
-        print("----------------------------------------------------")
-        print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency")
-        print("----------------------------------------------------")
+        print("----------------------------------------------------", flush=True)
+        print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency", flush=True)
+        print("----------------------------------------------------", flush=True)
         hladat.maf_filter()
+
+    end = time.time()
+
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print("---------------------", flush=True)
+    print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
+    print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
+    print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
+    print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
+    print("---------------------", flush=True)  
 
     return hladat
 
-def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
+def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str] = None,R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
     """
     Processes dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
@@ -130,25 +164,31 @@ def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
         file location of the dosage file
     phasefileloc: str
         file location of the phase file, this is needed for append sample IDs to the dosage file.
-    filterR2: str
+    filter_R2: str
         file location of the bgl.r2 file, this is needed for filtering out variants with low r2 (imputation) values.
+    R2_minimum: float
+        minimum R2 value to filter out variants with low imputation quality, default is 0.5
+    simpleQC: bool
+        if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
     Returns
     ------------
     hladat: HLAdat
         HLAdat object that has dataframe of the genomic data files
     """
+    start = time.time()
     sampleIDs = getSampleIDs(phasedfileloc)
     header = ["alleleA", "alleleB"]
     header.extend(sampleIDs)
-    print("----------------")
-    print("READING IN DATA")
-    print("----------------")
+    print("----------------", flush=True)
+    print("READING IN DATA", flush=True)
+    print(f"Dosage file:\t{dosagefileloc}", flush=True)
+    print("----------------", flush=True)
     df = pd.read_csv(dosagefileloc, sep=r"\s+", header=None, index_col=0)
     df.columns = header
 
-    if filterR2:
-        r2 = pd.read_csv(filterR2, sep=r"\s+", header=None, index_col=0)
-        safe = r2[r2[1]>0.5].index
+    if filter_R2:
+        r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
+        safe = r2[r2[1]>R2_minimum].index
         df = df.loc[safe] #pylint: disable=E1136
 
     ## gets information from variant ID
@@ -164,14 +204,24 @@ def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
     hladat.AA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
 
     if simpleQC:
-        print("----------------------------------------------------")
-        print("PERFORMING SIMPLE MAF FILTER: droppping 1% allele frequency")
-        print("----------------------------------------------------")
+        print("----------------------------------------------------", flush=True)
+        print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency", flush=True)
+        print("----------------------------------------------------", flush=True)
         hladat.maf_filter()
+
+    end = time.time()
+
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print("---------------------", flush=True)
+    print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
+    print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
+    print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
+    print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
+    print("---------------------", flush=True)    
 
     return hladat
 
-def getSampleIDs(phasedfileloc):
+def getSampleIDs(phasedfileloc: str) -> List[str]:
     """
     Extracts sample ID from phased file
 
@@ -185,42 +235,39 @@ def getSampleIDs(phasedfileloc):
 
     return list(sampIDs[ix])
 
-def breakitup(variantID):
+def breakitup(variantID: str):
     """
-    Used during reading in files to break variant IDs to different columns for sorting purpose
-
+    Breaks variant IDs into columns for sorting.
+    
     Parameters
     ------------
     variantID: str,
         variant ID from genotype files
     Returns
     ------------
-    idname,variantype,genename,aapos,genepos : str
-        idname - cleaned up id
-        variantype - SNPS, HLA or AA
-        genename - name of Gene if it is an amino acid variant
-        aapos - amino acid position number
-        genepos - genomic coordinate
+    Tuple[str, str, str, str, str]
+        idname, variantype, genename, aapos, genepos
+
+        - idname - cleaned up id
+        - variantype - SNPS, HLA or AA
+        - genename - name of Gene if it is an amino acid variant
+        - aapos - amino acid position number
+        - genepos - genomic coordinate
     """
-    tmpID = variantID.replace("*", "_")
-    tmpID = tmpID.replace("SNPS_", "SNP_")
+    tmpID = variantID.replace("*", "_").replace("SNPS_", "SNP_")
     tokens = tmpID.split("_")
+    
     if len(tokens) > 1:
         idname = ("_").join(tokens[:4])
-        while len(tokens)<4:
+        while len(tokens) < 4:
             tokens.append(np.nan)
-        variantype = tokens[0]
-        genename = tokens[1]
-        aapos = tokens[2]
-        genepos = tokens[3]
+        variantype, genename, aapos, genepos = tokens[0], tokens[1], tokens[2], tokens[3]
     else:
         idname = variantID
         if variantID.startswith("rs"):
             variantype = "SNP"
         else:
             variantype = variantID
-        genename = np.nan
-        aapos = np.nan
-        genepos = np.nan
+        genename = aapos = genepos = np.nan
 
     return idname,variantype,genename,aapos,genepos
