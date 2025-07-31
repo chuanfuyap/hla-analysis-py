@@ -67,9 +67,9 @@ def read_bgl(fileloc, filterR2=None, simpleQC=True):
     hladat = HLAdata(df, "hardcall")
     if simpleQC:
         print("----------------------------------------------------")
-        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("PERFORMING SIMPLE MAF FILTER: droppping 1% allele frequency")
         print("----------------------------------------------------")
-        hladat.qualitycontrol()
+        hladat.maf_filter()
 
     return hladat
 
@@ -110,13 +110,13 @@ def read_gprobs(fileloc, filterR2=None, simpleQC=True):
     print("---------------------")
     print("CONVERTING TO DOSAGE")
     print("---------------------")
-    hladat.convertDosage()
+    hladat.convert_dosage()
 
     if simpleQC:
         print("----------------------------------------------------")
-        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency")
         print("----------------------------------------------------")
-        hladat.qualitycontrol()
+        hladat.maf_filter()
 
     return hladat
 
@@ -165,9 +165,9 @@ def read_dosage(dosagefileloc, phasedfileloc, filterR2=None, simpleQC=True):
 
     if simpleQC:
         print("----------------------------------------------------")
-        print("PERFORMING SIMPLE QC: droppping 1% allele frequency")
+        print("PERFORMING SIMPLE MAF FILTER: droppping 1% allele frequency")
         print("----------------------------------------------------")
-        hladat.qualitycontrol()
+        hladat.maf_filter()
 
     return hladat
 
@@ -187,7 +187,7 @@ def getSampleIDs(phasedfileloc):
 
 def breakitup(variantID):
     """
-    Function called by processBGL() to break variant IDs to different columns for sorting purpose
+    Used during reading in files to break variant IDs to different columns for sorting purpose
 
     Parameters
     ------------
