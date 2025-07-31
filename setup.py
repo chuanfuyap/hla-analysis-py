@@ -31,11 +31,12 @@ setup(name="hapy",
       author_email='yapchuanfu@gmail.com',
       license='GNU GPLv3',
       packages=find_packages(),
-      python_requires='>3.3',
+      python_requires='==3.11.*',
       install_requires=[
         'pandas>=1.0.0,<2.0.0',
         'numpy>=1.20.0,<2.0.0',
-        'scipy>=1.7.0,<2.0.0',
+        'scipy>=1.7.0,<1.10.0',
         'statsmodels>=0.13.0,<0.14.0',
         'lifelines>=0.27.0,<0.30.0',
+        'scikit-learn>=1.0.0,<1.10.0'
     ])
