@@ -10,6 +10,7 @@ Some of the hardcall data processing code adapted from [here](https://github.com
 __all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage"]
 from typing import Optional, List
 import time
+import gc
 
 import pandas as pd
 import numpy as np
@@ -61,6 +62,11 @@ def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 
     df = df[df[markers]=="M"]  #pylint: disable=E1136
     df = df.drop(markers, axis=1)
 
+    end = time.time()
+
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+
+    start = time.time()
     if filter_R2:
         r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
         safe = r2[r2[1]>R2_minimum].index
@@ -81,13 +87,16 @@ def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 
 
     end = time.time()
 
-    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print(f"Elapsed time for processing data: {end - start:.4f} seconds", flush=True)
     print("---------------------", flush=True)
     print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
     print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
     print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
     print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
-    print("---------------------", flush=True)    
+    print("---------------------", flush=True)
+
+    del df
+    gc.collect()  # Clear memory
 
     return hladat
 
@@ -119,6 +128,10 @@ def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float
     namecheck = df.index.name
     assert namecheck == "marker", "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
 
+    end = time.time()
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+
+    start = time.time()
     if filter_R2:
         r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
         safe = r2[r2[1]>R2_minimum].index
@@ -144,13 +157,16 @@ def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float
 
     end = time.time()
 
-    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print(f"Elapsed time for processing: {end - start:.4f} seconds", flush=True)
     print("---------------------", flush=True)
     print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
     print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
     print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
     print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
-    print("---------------------", flush=True)  
+    print("---------------------", flush=True)
+
+    del df
+    gc.collect()  # Clear memory
 
     return hladat
 
@@ -186,6 +202,10 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
     df = pd.read_csv(dosagefileloc, sep=r"\s+", header=None, index_col=0)
     df.columns = header
 
+    end = time.time()
+    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+
+    start = time.time()
     if filter_R2:
         r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
         safe = r2[r2[1]>R2_minimum].index
@@ -201,7 +221,7 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
     ## drops ["alleleA", "alleleB"] off from "data" as this is now stored in "info" of the HLAData object
     hladat.SNP.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
     hladat.HLA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
-    hladat.AA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+    hladat.AA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True) 
 
     if simpleQC:
         print("----------------------------------------------------", flush=True)
@@ -211,13 +231,16 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
 
     end = time.time()
 
-    print(f"Elapsed time for loading: {end - start:.4f} seconds", flush=True)
+    print(f"Elapsed time for processing: {end - start:.4f} seconds", flush=True)
     print("---------------------", flush=True)
     print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
     print("Number of SNPs:\t", hladat.SNP.info.AA_ID.nunique(), flush=True)
     print("Number of HLA Alleles:\t", hladat.HLA.info.AA_ID.nunique(), flush=True)
     print("Number of Amino Acids:\t", hladat.AA.info.AA_ID.nunique(), flush=True)
-    print("---------------------", flush=True)    
+    print("---------------------", flush=True)
+
+    del df
+    gc.collect()  # Clear memory
 
     return hladat
 

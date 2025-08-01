@@ -15,7 +15,7 @@ class HLAdata:
     """
     The object type to store the all genotype information for HLA, which includes HLA-4digit (HLA), Amino Acid (AA) and SNPs.
     """
-    def __init__(self, genomedata: pd.DataFrame, data_type: str):
+    def __init__(self, genomedata: pd.DataFrame, data_type: str, load_types: tuple=('HLA', 'SNP', 'AA')):
         """
         Initialize HLAdata object with formatted genome data.
 
@@ -25,6 +25,8 @@ class HLAdata:
             dataframe formatted with additional info when reading in the data.
         data_type : str
             'hardcall' or 'softcall' (dosage).
+        load_types : tuple
+            tuple of strings indicating which types of data to load. Options are 'HLA', 'SNP', and 'AA'.
 
         The class will create one attribute each for HLA, SNP, and AA data, which are SimpleNamespace objects containing 'data' and 'info' attributes.
         
@@ -45,14 +47,24 @@ class HLAdata:
             raise ValueError("data_type must be 'hardcall' or 'softcall'")
 
         self.type = data_type
-        self.HLA = self._add_data(genomedata[genomedata.TYPE == "HLA"], "HLA")
-        self.SNP = self._add_data(genomedata[genomedata.TYPE == "SNP"], "SNP")
-        self.AA = self._add_data(genomedata[genomedata.TYPE == "AA"], "AA")
+        if 'HLA' in load_types:
+            self.HLA = self._add_data(genomedata[genomedata.TYPE == "HLA"], "HLA")
+        if 'SNP' in load_types:
+            self.SNP = self._add_data(genomedata[genomedata.TYPE == "SNP"], "SNP")
+        if 'AA' in load_types:
+            self.AA = self._add_data(genomedata[genomedata.TYPE == "AA"], "AA")
 
         if data_type == "softcall":
             alleleAB = genomedata[["alleleA", "alleleB", "TYPE"]]
-            for name, obj in zip(["HLA", "SNP", "AA"], [self.HLA, self.SNP, self.AA]):
-                obj.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE == name][["alleleA", "alleleB"]].values
+            for name in ["HLA", "SNP", "AA"]:
+                obj = getattr(self, name, None)  # Get attribute if it exists, else None
+                if obj is not None:
+                    mask = alleleAB.TYPE == name
+                    # .loc to ensure index alignment
+                    obj.info[["alleleA", "alleleB"]] = alleleAB.loc[mask, ["alleleA", "alleleB"]].values
+
+            #for name, obj in zip(["HLA", "SNP", "AA"], [self.HLA, self.SNP, self.AA]):
+               #obj.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE == name][["alleleA", "alleleB"]].values
 
     def _add_data(self, genomedata: pd.DataFrame, allele_type: str) -> SimpleNamespace:
         """
