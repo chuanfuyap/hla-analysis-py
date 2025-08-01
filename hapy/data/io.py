@@ -74,7 +74,7 @@ def getSampleIDs(phasedfileloc: str) -> List[str]:
     List[str]
         List of sample IDs corresponding to individuals in the dataset.
     """
-    with open(phasedfileloc, "r") as f:
+    with open(phasedfileloc, "r") as f:  #pylint: disable=W1514
         sampIDs = np.array(f.readline().split()[2:])
         idCount2 = len(sampIDs)
         ix = [i for i in range(1, idCount2, 2)]
@@ -146,6 +146,8 @@ class GenomicsFileReader(abc.ABC):
         self.filter_R2 = filter_R2
         self.R2_minimum = R2_minimum
         self.simpleQC = simpleQC
+        if isinstance(load_types, str):
+            load_types = (load_types,)
         self.load_types = load_types
 
     @abc.abstractmethod
@@ -159,7 +161,7 @@ class GenomicsFileReader(abc.ABC):
         Any
             Processed data object (typically HLAdat or DataFrame).
         """
-        pass
+        pass  #pylint: disable=W0107
 
     def postprocess(self, hladat: HLAdata):
         """
@@ -180,12 +182,58 @@ class GenomicsFileReader(abc.ABC):
             print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency", flush=True)
             print("----------------------------------------------------", flush=True)
             hladat.maf_filter()
+
         print("---------------------", flush=True)
-        print(f"Sample Size:\t {len(hladat.SNP.data.columns)/2:.0f}", flush=True)
-        for load_type in self.load_types:
-            print(f"Number of {load_type} variants:\t{len(getattr(hladat, load_type).AA_ID.nunique())}", flush=True)
+        # List of expected possible types
+        possible_types = self.load_types if hasattr(self, "load_types") else ["SNP", "HLA", "AA"]
+        # Find the first available attribute in hladat for sample size
+        sample_obj = None
+        for lt in possible_types:
+            if hasattr(hladat, lt):
+                sample_obj = getattr(hladat, lt)
+                break
+
+        if sample_obj is not None:
+            print(f"Sample Size:\t {len(sample_obj.data.columns)//2}", flush=True)
+        else:
+            print("No valid data type found for sample size.", flush=True)
+
+        # Print counts only for attributes that exist
+        for load_type in possible_types:
+            if hasattr(hladat, load_type):
+                obj = getattr(hladat, load_type)
+                count = obj.info.AA_ID.nunique()
+                print(f"Number of {load_type} variants:\t{count}", flush=True)
+
         print("---------------------", flush=True)
         gc.collect()
+        return hladat
+    
+    def _load_and_process(self, file_path, file_read_fn, call_type, variant_index_name="SNP", convert_dosage=False, drop_alleles=False, extra_args=None):
+        start = time.time()
+        print("----------------", flush=True)
+        print("READING IN DATA", flush=True)
+        print(f"File:\t{file_path}", flush=True)
+        print("----------------", flush=True)
+        df = file_read_fn(file_path, extra_args)
+        print(f"Elapsed time for loading: {time.time() - start:.4f} seconds", flush=True)
+        start2 = time.time()
+        df = _apply_r2_filter(df, self.filter_R2, self.R2_minimum)
+        df = _add_variant_info(df, index_name=variant_index_name)
+        hladat = HLAdata(df, call_type, load_types=self.load_types)
+        if convert_dosage:
+            print("---------------------", flush=True)
+            print("CONVERTING TO DOSAGE", flush=True)
+            print("---------------------", flush=True)
+            hladat.convert_dosage()
+        if drop_alleles:
+            for load_type in self.load_types:
+                if hasattr(hladat, load_type):
+                    obj = getattr(hladat, load_type)
+                    obj.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
+        del df
+        hladat = self.postprocess(hladat)
+        print(f"Elapsed time for processing: {time.time() - start2:.4f} seconds", flush=True)
         return hladat
 
 # --- Specific Readers ---
@@ -244,24 +292,13 @@ class BGLFileReader(GenomicsFileReader):
         self.fileloc = fileloc
 
     def read(self) -> HLAdata:
-        start = time.time()
-        print("----------------", flush=True)
-        print("READING IN DATA", flush=True)
-        print(f"BGL file:\t{self.fileloc}", flush=True)
-        print("----------------", flush=True)
-        df = pd.read_csv(self.fileloc, sep=r"\s+", header=0, index_col=1)
-        marker_col = df.columns[0]
-        df = df[df[marker_col] == "M"].drop(marker_col, axis=1)
-        print(f"Elapsed time for loading: {time.time() - start:.4f} seconds", flush=True)
-        start2 = time.time()
-        df = _apply_r2_filter(df, self.filter_R2, self.R2_minimum)
-        df = _add_variant_info(df)
-        hladat = HLAdata(df, "hardcall", load_types=self.load_types)
-        del df
-        hladat = self.postprocess(hladat)
-        print(f"Elapsed time for processing data: {time.time() - start2:.4f} seconds", flush=True)
-        
-        return hladat
+        def file_read_fn(file_path, _):
+            df = pd.read_csv(file_path, sep=r"\s+", header=0, index_col=1)
+            marker_col = df.columns[0]
+            df = df[df[marker_col] == "M"].drop(marker_col, axis=1)
+            return df
+
+        return self._load_and_process(self.fileloc, file_read_fn, "hardcall")
 
 class GProbsFileReader(GenomicsFileReader):
     """
@@ -290,29 +327,14 @@ class GProbsFileReader(GenomicsFileReader):
         self.fileloc = fileloc
 
     def read(self) -> HLAdata:
-        start = time.time()
-        print("----------------", flush=True)
-        print("READING IN DATA", flush=True)
-        print(f"GPROB file:\t{self.fileloc}", flush=True)
-        print("----------------", flush=True)
-        df = pd.read_csv(self.fileloc, sep=r"\s+", header=0, index_col=0)
-        assert df.index.name == "marker", (
-            "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
-        )
-        print(f"Elapsed time for loading: {time.time() - start:.4f} seconds", flush=True)
-        start2 = time.time()
-        df = _apply_r2_filter(df, self.filter_R2, self.R2_minimum)
-        df = _add_variant_info(df)
-        hladat = HLAdata(df, "softcall", load_types=self.load_types)
-        print("---------------------", flush=True)
-        print("CONVERTING TO DOSAGE", flush=True)
-        print("---------------------", flush=True)
-        hladat.convert_dosage()
-        del df
-        hladat = self.postprocess(hladat)
-        print(f"Elapsed time for processing: {time.time() - start2:.4f} seconds", flush=True)
-        
-        return hladat
+        def file_read_fn(file_path, _):
+            df = pd.read_csv(file_path, sep=r"\s+", header=0, index_col=0)
+            assert df.index.name == "marker", (
+                "ERROR: File appears to be modified. If this is a SNP2HLA output, please use the dosage output with `read_dosage(dosagefileloc, phasedfileloc)` instead."
+            )
+            return df
+
+        return self._load_and_process(self.fileloc, file_read_fn, "softcall", convert_dosage=True)
 
 class DosageFileReader(GenomicsFileReader):
     """
@@ -344,28 +366,14 @@ class DosageFileReader(GenomicsFileReader):
         self.phasedfileloc = phasedfileloc
 
     def read(self) -> HLAdata:
-        start = time.time()
-        sampleIDs = getSampleIDs(self.phasedfileloc)
-        header = ["alleleA", "alleleB"] + sampleIDs
-        print("----------------", flush=True)
-        print("READING IN DATA", flush=True)
-        print(f"Dosage file:\t{self.dosagefileloc}", flush=True)
-        print("----------------", flush=True)
-        df = pd.read_csv(self.dosagefileloc, sep=r"\s+", header=None, index_col=0)
-        df.columns = header
-        print(f"Elapsed time for loading: {time.time() - start:.4f} seconds", flush=True)
-        start2 = time.time()
-        df = _apply_r2_filter(df, self.filter_R2, self.R2_minimum)
-        df = _add_variant_info(df)
-        hladat = HLAdata(df, "softcall", load_types=self.load_types)
-        # Drop ["alleleA", "alleleB"] from dataframes
-        for obj in [hladat.SNP, hladat.HLA, hladat.AA]:
-            obj.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
-        del df
-        hladat = self.postprocess(hladat)
-        print(f"Elapsed time for processing: {time.time() - start2:.4f} seconds", flush=True)
-        
-        return hladat
+        def file_read_fn(file_path, extra_args):
+            sampleIDs = getSampleIDs(extra_args)
+            header = ["alleleA", "alleleB"] + sampleIDs
+            df = pd.read_csv(file_path, sep=r"\s+", header=None, index_col=0)
+            df.columns = header
+            return df
+
+        return self._load_and_process(self.dosagefileloc, file_read_fn, "softcall", drop_alleles=True, extra_args=self.phasedfileloc)
 
 # --- Facade Functions ---
 

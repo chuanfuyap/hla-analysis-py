@@ -63,9 +63,6 @@ class HLAdata:
                     # .loc to ensure index alignment
                     obj.info[["alleleA", "alleleB"]] = alleleAB.loc[mask, ["alleleA", "alleleB"]].values
 
-            #for name, obj in zip(["HLA", "SNP", "AA"], [self.HLA, self.SNP, self.AA]):
-               #obj.info[["alleleA", "alleleB"]] = alleleAB[alleleAB.TYPE == name][["alleleA", "alleleB"]].values
-
     def _add_data(self, genomedata: pd.DataFrame, allele_type: str) -> SimpleNamespace:
         """
         Formats and returns genotype data and info as a SimpleNamespace.
@@ -250,8 +247,6 @@ def _makedosage_HLA_SNP(dataframe: pd.DataFrame) -> pd.DataFrame:
     dosedf = dosedf.drop("samples", axis=0)
 
     return dosedf
-
-
 
 def _makedosage_AA(dataframe: pd.DataFrame) -> pd.DataFrame:
     """
