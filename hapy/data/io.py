@@ -33,7 +33,7 @@ def read_famfile(fileloc: str) -> pd.DataFrame:
 
     return fam
 
-def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
+def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True,load_types: tuple=('HLA', 'SNP', 'AA')) -> HLAdata:
     """
     Processes Phased Beagle file and store it as HLAdat object. This gives the hardcall of the variants.
 
@@ -47,6 +47,9 @@ def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 
         minimum R2 value to filter out variants with low imputation quality, default is 0.5
     simpleQC: bool
         if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
+    load_types : tuple
+            tuple of strings indicating which types of data to load. Options are 'HLA', 'SNP', and 'AA'.
+
     Returns
     ------------
     hladat: HLAdat
@@ -78,7 +81,7 @@ def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand")
 
     df = df.drop(columns=["SNP"], axis=1)
-    hladat = HLAdata(df, "hardcall")
+    hladat = HLAdata(df, "hardcall", load_types=load_types)
     if simpleQC:
         print("----------------------------------------------------", flush=True)
         print("PERFORMING SIMPLE MAF FILTER: droppping 0.5% allele frequency", flush=True)
@@ -100,7 +103,7 @@ def read_bgl(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 
 
     return hladat
 
-def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
+def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: tuple=('HLA', 'SNP', 'AA')) -> HLAdata:
     """
     Processes Beagle probability file, transform it into dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
@@ -114,6 +117,8 @@ def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float
         minimum R2 value to filter out variants with low imputation quality, default is 0.5
     simpleQC: bool
         if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
+    load_types : tuple
+            tuple of strings indicating which types of data to load. Options are 'HLA', 'SNP', and 'AA'.
     Returns
     ------------
     hladat: HLAdat
@@ -143,7 +148,7 @@ def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand") #pylint: disable=E1101,E1137
     df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
 
-    hladat = HLAdata(df, "softcall")
+    hladat = HLAdata(df, "softcall", load_types=load_types)
     print("---------------------", flush=True)
     print("CONVERTING TO DOSAGE", flush=True)
     print("---------------------", flush=True)
@@ -170,7 +175,7 @@ def read_gprobs(fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float
 
     return hladat
 
-def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str] = None,R2_minimum: float = 0.5, simpleQC: bool = True) -> HLAdata:
+def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str] = None,R2_minimum: float = 0.5, simpleQC: bool = True, load_types: tuple=('HLA', 'SNP', 'AA')) -> HLAdata:
     """
     Processes dosage file and store it as HLAdat object. Dosage is the probabilistic gene copy information.
 
@@ -186,6 +191,8 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
         minimum R2 value to filter out variants with low imputation quality, default is 0.5
     simpleQC: bool
         if True, performs a simple MAF filter by dropping variants with allele frequency below 0.5% (default)
+    load_types : tuple
+            tuple of strings indicating which types of data to load. Options are 'HLA', 'SNP', and 'AA'.
     Returns
     ------------
     hladat: HLAdat
@@ -217,7 +224,7 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1,result_type="expand") #pylint: disable=E1101,E1137
     df = df.drop(columns=["SNP"], axis=1) #pylint: disable=E1101
 
-    hladat = HLAdata(df, "softcall")
+    hladat = HLAdata(df, "softcall", load_types=load_types)
     ## drops ["alleleA", "alleleB"] off from "data" as this is now stored in "info" of the HLAData object
     hladat.SNP.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
     hladat.HLA.data.drop(columns=["alleleA", "alleleB"], axis=1, inplace=True)
