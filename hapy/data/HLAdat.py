@@ -274,7 +274,7 @@ def _makedosage_AA(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     for samp in df.samples.unique():
         sampdf = df[df.samples==samp]
-        sampdf = sampdf.append(at_checks, ignore_index=True)
+        sampdf = pd.concat([sampdf, at_checks], ignore_index=True)
         dose = sampdf.apply(dosage_AA, axis=0)
         dosage_dict[samp]=dose
 

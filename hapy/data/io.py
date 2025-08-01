@@ -194,7 +194,11 @@ class GenomicsFileReader(abc.ABC):
                 break
 
         if sample_obj is not None:
-            print(f"Sample Size:\t {len(sample_obj.data.columns)//2}", flush=True)
+            if hasattr(hladat, "type") and hladat.type == "hardcall":
+                sample_size = len(sample_obj.data.columns) // 2
+            else:
+                sample_size = len(sample_obj.data.columns)
+            print(f"Sample Size:\t {sample_size}", flush=True)
         else:
             print("No valid data type found for sample size.", flush=True)
 
