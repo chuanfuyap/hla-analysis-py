@@ -111,24 +111,18 @@ class HLAdata:
         """
 
         if self.type == "hardcall":
-            self.SNP.data = _qc_hard(self.SNP.data, allele_filter)
-            self.SNP.info =self.SNP.info.loc[self.SNP.data.index]
-
-            self.HLA.data = _qc_hard(self.HLA.data, allele_filter)
-            self.HLA.info =self.HLA.info.loc[self.HLA.data.index]
-
-            self.AA.data = _qc_hard(self.AA.data, allele_filter)
-            self.AA.info =self.AA.info.loc[self.AA.data.index]
+            for name in ["HLA", "SNP", "AA"]:
+                obj = getattr(self, name, None)  # Get attribute if it exists, else None
+                if obj is not None:
+                    obj.data = _qc_hard(obj.data, allele_filter)
+                    obj.info = obj.info.loc[obj.data.index]
 
         elif self.type == "softcall":
-            self.SNP.data = _qc_prob(self.SNP.data, allele_filter)
-            self.SNP.info =self.SNP.info.loc[self.SNP.data.index]
-
-            self.HLA.data = _qc_prob(self.HLA.data, allele_filter)
-            self.HLA.info =self.HLA.info.loc[self.HLA.data.index]
-
-            self.AA.data = _qc_prob(self.AA.data, allele_filter)
-            self.AA.info =self.AA.info.loc[self.AA.data.index]
+            for name in ["HLA", "SNP", "AA"]:
+                obj = getattr(self, name, None)  # Get attribute if it exists, else None
+                if obj is not None:
+                    obj.data = _qc_prob(obj.data, allele_filter)
+                    obj.info = obj.info.loc[obj.data.index]
 
         else:
             raise ValueError(f"Unknown data type '{self.type}'.")
@@ -141,10 +135,14 @@ class HLAdata:
         """
         if self.type != "softcall":
             raise ValueError("convert_dosage can only be used with 'softcall' data type.")
-        
-        self.SNP.data = _makedosage_HLA_SNP(self.SNP.data)
-        self.HLA.data = _makedosage_HLA_SNP(self.HLA.data)
-        self.AA.data = _makedosage_AA(self.AA.data)
+
+        for name in ["HLA", "SNP", "AA"]:
+            obj = getattr(self, name, None)  # Get attribute if it exists, else None
+            if obj is not None:
+                if name == "AA":
+                    obj.data = _makedosage_AA(obj.data)
+                else:
+                    obj.data = _makedosage_HLA_SNP(obj.data)
 
 def _qc_hard(dataframe: pd.DataFrame, allele_filter: float) -> pd.DataFrame:
     """
