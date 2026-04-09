@@ -238,6 +238,8 @@ class GenomicsFileReader(abc.ABC):
         del df
         hladat = self.postprocess(hladat)
         print(f"Elapsed time for processing: {time.time() - start2:.4f} seconds", flush=True)
+        print()
+        print(f"TOTAL TIME TAKEN: {time.time() - start:.4f} seconds", flush=True)
         return hladat
 
 # --- Specific Readers ---
