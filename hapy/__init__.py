@@ -1,8 +1,8 @@
 """
 main `hapy` init file
 """
-from hapy.data import *
-from hapy.stats import *
-from hapy.vis import *
+from .data import *
+from .stats import *
+from .vis import *
 
 __version__ = "0.2"

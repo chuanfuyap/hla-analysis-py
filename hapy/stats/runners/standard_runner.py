@@ -221,8 +221,9 @@ def run_standard(
     out = pd.DataFrame(rows)
 
     # Coalesce omnibus/univariate p into one convenience column
-    if "LR_p" in out.columns and "Uni_p" in out.columns:
-        out["LRp_Unip"] = out["LR_p"].combine_first(out["Uni_p"])
+    if adapter.KIND=="AA":
+        if "LR_p" in out.columns and "Uni_p" in out.columns:
+            out["LRp_Unip"] = out["LR_p"].combine_first(out["Uni_p"])
 
     # Clean: convert empty strings (if any) to NaN, then drop all-empty columns
     for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str"):

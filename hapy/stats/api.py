@@ -87,6 +87,9 @@ def analyse(
     """
     if kind not in _KIND_MAP:
         raise ValueError(f"Unknown kind={kind}. Must be one of {sorted(_KIND_MAP.keys())}")
+    
+    if not hasattr(hladat, kind):
+        raise ValueError(f"{kind} not loaded. Please read the file type into HLAdat object.")
 
     adapter = _KIND_MAP[kind]
     return run_standard(
@@ -178,6 +181,9 @@ def interaction(
         Pairwise mode: one row per (A_col, B_col) test.
         Omnibus mode: one row per (anchor_col, AA_block_variant) test.
     """
+    if not hasattr(hladat, a_kind):
+        raise ValueError(f"{a_kind} not loaded. Please read the file type into HLAdat object.")
+    
     if a_kind not in _KIND_MAP:
         raise ValueError(f"Unknown a_kind={a_kind}. Must be one of {sorted(_KIND_MAP.keys())}")
 
@@ -283,6 +289,9 @@ def survival(
     """
     if kind not in _KIND_MAP:
         raise ValueError(f"Unknown kind={kind}. Must be one of {sorted(_KIND_MAP.keys())}")
+    
+    if not hasattr(hladat, kind):
+        raise ValueError(f"{kind} not loaded. Please read the file type into HLAdat object.")
 
     adapter = _KIND_MAP[kind]
     return run_survival(
