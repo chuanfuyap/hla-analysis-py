@@ -102,7 +102,6 @@ def analyse(
         print_every=print_every,
     )
 
-
 def interaction(
     hladat,
     famfile: pd.DataFrame,
@@ -115,6 +114,7 @@ def interaction(
     pair_filter=None,
     cov_block_cols: list[str] | None = None,
     baseline_covar_cols: list[str] | None = None,
+    block_b_df: pd.DataFrame | None = None,  # <-- NEW (for b_kind="DF")
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 500,
@@ -125,14 +125,18 @@ def interaction(
     Supported blocks
     ----------------
     - a_kind: "AA" | "HLA" | "SNP"
-    - b_kind: "AA" | "HLA" | "SNP" | "COV"
+    - b_kind: "AA" | "HLA" | "SNP" | "COV" | "DF"
+
+    Where:
+    - b_kind="COV" uses covariate columns as block B features (cov_block_cols required)
+    - b_kind="DF"  uses an external IID-indexed dataframe as block B features (block_b_df required)
 
     Interaction modes
     -----------------
     - mode="pairwise":
         Tests each feature column from A against each feature column from B:
-          Null: Y ~ baseline_covars + A + B
-          Alt:  Null + A:B
+          Base: Y ~ baseline_covars + A + B
+          Alt:  Base + A:B
         Returns signed interaction coefficient I_coef.
 
     - mode="one_vs_block_omnibus":
@@ -140,7 +144,7 @@ def interaction(
           Null: Y ~ baseline_covars + anchor + AA_block
           Alt:  Null + sum(anchor:AA_block_j)
         IMPORTANT RULE: This mode is only supported when AA is one of the blocks
-        (regardless of whether AA is on A or B).
+        (regardless of whether AA is on A or B). The anchor side may be genotypes, COV, or DF.
 
     Parameters
     ----------
@@ -149,7 +153,7 @@ def interaction(
     config:
         InteractionConfig with model_type and mode, plus parallel settings.
     a_kind, b_kind:
-        Block types. b_kind="COV" uses covariate columns as block B features.
+        Block types.
     pair_filter:
         Optional callable(ctx)->bool for dropping specific A/B pairs or columns.
         Context schema is documented in hapy.stats.filters.
@@ -158,8 +162,13 @@ def interaction(
     baseline_covar_cols:
         Optional list of covariate columns to always include as baseline adjustment.
         If omitted:
-          - when b_kind != "COV": baseline = all covar columns
+          - when b_kind not in {"COV"}: baseline = all covar columns
           - when b_kind == "COV": baseline = all covar columns EXCEPT cov_block_cols
+        (For b_kind="DF", baseline defaults to all covar columns.)
+    block_b_df:
+        Required if b_kind="DF".
+        IID-indexed dataframe (index must match famfile IID / modelling IID set).
+        Columns are treated as block B features (each column interacts with each A column in pairwise mode).
     verbose, use_progress_bar, print_every:
         Progress reporting controls.
 
@@ -168,18 +177,28 @@ def interaction(
     pandas.DataFrame
         Pairwise mode: one row per (A_col, B_col) test.
         Omnibus mode: one row per (anchor_col, AA_block_variant) test.
-
-        Includes QC columns (N_used, N_case, N_control) and direction columns:
-        - Pairwise: I_coef (signed)
-        - Omnibus: I_block_coefs (signed coefficients per anchor:block term)
     """
     if a_kind not in _KIND_MAP:
         raise ValueError(f"Unknown a_kind={a_kind}. Must be one of {sorted(_KIND_MAP.keys())}")
-    if b_kind != "COV" and b_kind not in _KIND_MAP:
-        raise ValueError(f"Unknown b_kind={b_kind}. Must be one of {sorted(_KIND_MAP.keys()) + ['COV']}")
+
+    allowed_b = sorted(list(_KIND_MAP.keys()) + ["COV", "DF"])
+    if b_kind not in allowed_b:
+        raise ValueError(f"Unknown b_kind={b_kind}. Must be one of {allowed_b}")
+
+    if b_kind == "COV":
+        if cov_block_cols is None:
+            raise ValueError("b_kind='COV' requires cov_block_cols.")
+        if block_b_df is not None:
+            raise ValueError("block_b_df is only used when b_kind='DF'.")
+
+    if b_kind == "DF":
+        if block_b_df is None:
+            raise ValueError("b_kind='DF' requires block_b_df.")
+        if cov_block_cols is not None:
+            raise ValueError("cov_block_cols is only used when b_kind='COV'.")
 
     adapter_a = _KIND_MAP[a_kind]
-    adapter_b = _KIND_MAP[b_kind] if b_kind != "COV" else None
+    adapter_b = _KIND_MAP[b_kind] if b_kind in _KIND_MAP else None  # None for COV/DF
 
     return run_interaction(
         adapter_a=adapter_a,
@@ -194,6 +213,7 @@ def interaction(
         pair_filter=pair_filter,
         cov_block_cols=cov_block_cols,
         baseline_covar_cols=baseline_covar_cols,
+        block_b_df=block_b_df,  # <-- pass through
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,

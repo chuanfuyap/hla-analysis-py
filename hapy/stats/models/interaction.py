@@ -1,4 +1,3 @@
-python name=hapy/stats/models/interaction.py url=https://github.com/chuanfuyap/hla-analysis-py/blob/master/hapy/stats/models/interaction.py
 """
 Interaction model engine.
 
