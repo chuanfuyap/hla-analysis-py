@@ -6,3 +6,4 @@ build/
 .hapy.egg-info/
 .build/lib/hapy
 .build/
+hapy/stats/stats_old.py
