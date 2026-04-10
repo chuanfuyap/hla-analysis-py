@@ -63,6 +63,9 @@ def makehaplodf(aa_df: pd.DataFrame, basicQC: bool = True) -> tuple[pd.DataFrame
     haplo = df.columns
     aminoacids = get_aminoacids(aminoacids, haplo)
 
+    if len(aminoacids) >1:
+        df.columns = aminoacids
+
     return df.sort_index(), aminoacids
 
 
