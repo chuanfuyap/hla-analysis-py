@@ -73,7 +73,7 @@ def _run_survival_one_variant(variant_id: str) -> dict:
 
     row = dict(meta)
     row["VARIANT"] = variant_id
-    row.update(qc)
+    #row.update(qc)
 
     if qc["N_used"] == 0 or len(geno_cols) == 0:
         row.update({"LR_p": np.nan, "p": np.nan, "HR": np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
