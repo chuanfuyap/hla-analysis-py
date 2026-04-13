@@ -139,8 +139,8 @@ def checkAAblock(aablock: list[str]) -> str:
         aakeys = list(aminoacids.keys())
         if aminoacids[aakeys[0]] != aminoacids[aakeys[1]]:
             aablock = aakeys[0]
-        else:
-            aablock = ("").join(aablock)
+        elif "x" in aakeys:
+            aablock = ("").join(aakeys)
     elif len(aminoacids) == 1:
         aablock = aablock[0]
     else:
