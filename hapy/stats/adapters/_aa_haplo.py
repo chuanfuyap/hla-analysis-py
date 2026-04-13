@@ -44,7 +44,9 @@ def makehaplodf(aa_df: pd.DataFrame, basicQC: bool = True) -> tuple[pd.DataFrame
     df = aa_df.copy()
     aminoacids = df.index
 
-    df = df.drop(columns=["AA_ID"], axis=1).T
+    aa_id = df["AA_ID"].unique()
+
+    df = df.drop(columns=["AA_ID"]).T
     df["haplo"] = df.apply(lambda x: "".join(x), axis=1)
 
     df = df.reset_index()
@@ -137,6 +139,8 @@ def checkAAblock(aablock: list[str]) -> str:
         aakeys = list(aminoacids.keys())
         if aminoacids[aakeys[0]] != aminoacids[aakeys[1]]:
             aablock = aakeys[0]
+        else:
+            aablock = ("").join(aablock)
     elif len(aminoacids) == 1:
         aablock = aablock[0]
     else:
@@ -242,7 +246,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
         if len(aalist) > 1:
             refix = np.argmax(haplodf.sum())
             refcol = haplodf.columns[refix]
-            haplodf = haplodf.drop(refcol, axis=1)
+            haplodf = haplodf.drop(columns = refcol)
             haplocount = haplodf.shape[1]
             refAA = refcol
             AAcount = 2
