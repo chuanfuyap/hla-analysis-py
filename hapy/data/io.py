@@ -306,41 +306,6 @@ class BGLFileReader(GenomicsFileReader):
 
         return self._load_and_process(self.fileloc, file_read_fn, "hardcall")
 
-class PLINKRawFileReader(GenomicsFileReader):
-    """
-    Reader for phased Beagle genotype files.
-
-    Parameters
-    ----------
-    fileloc : str
-        File path to Beagle file (.bgl).
-    filter_R2 : Optional[str], default None
-        File path for R2 filtering.
-    R2_minimum : float, default 0.5
-        R2 threshold.
-    simpleQC : bool, default True
-        Whether to apply MAF filter.
-    load_types : Tuple[str, ...], default ('HLA', 'SNP', 'AA')
-        Types of data to load.
-
-    Returns
-    -------
-    HLAdata
-        HLAdat object containing processed genotype data.
-    """
-    def __init__(self, fileloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
-        super().__init__(filter_R2, R2_minimum, simpleQC, load_types)
-        self.fileloc = fileloc
-
-    def read(self) -> HLAdata:
-        def file_read_fn(file_path, _):
-            df = pd.read_csv(file_path, sep=r"\s+", header=0, index_col=1)
-            marker_col = df.columns[0]
-            df = df[df[marker_col] == "M"].drop(marker_col, axis=1)
-            return df
-
-        return self._load_and_process(self.fileloc, file_read_fn, "hardcall")
-
 class GProbsFileReader(GenomicsFileReader):
     """
     Reader for Beagle genotype probability files.
@@ -416,6 +381,43 @@ class DosageFileReader(GenomicsFileReader):
 
         return self._load_and_process(self.dosagefileloc, file_read_fn, "softcall", drop_alleles=True, extra_args=self.phasedfileloc)
 
+
+class PLINKRawFileReader(GenomicsFileReader):
+    """
+    Reader for PLINK .raw files, i.e. files generated from PLINK using `-export A`.
+
+    Parameters
+    ----------
+    plinkrawloc : str
+        File path to plink .raw file.
+    plinkpvarloc : str
+        File path to plink .pvar genotype file (for variant information).
+    filter_R2 : Optional[str], default None
+        File path for R2 filtering.
+    R2_minimum : float, default 0.5
+        R2 threshold.
+    simpleQC : bool, default True
+        Whether to apply MAF filter.
+    load_types : Tuple[str, ...], default ('HLA', 'SNP', 'AA')
+        Types of data to load.
+
+    Returns
+    -------
+    HLAdata
+        HLAdat object containing processed dosage data.
+    """
+    def __init__(self, plinkrawloc: str, plinkpvarloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
+        super().__init__(filter_R2, R2_minimum, simpleQC, load_types)
+        self.plinkrawloc = plinkrawloc
+        self.plinkpvarloc = plinkpvarloc
+
+    def read(self) -> HLAdata:
+        def file_read_fn(file_path, extra_args):
+            df = pd.read_csv(file_path, sep=r"\s+", index_col=1 ).drop(columns=["FID", "PAT", "MAT","SEX", "PHENOTYPE"])
+            df.columns = header
+            return df
+
+        return self._load_and_process(self.plinkrawloc, file_read_fn, "softcall", drop_alleles=True, extra_args=self.phasedfileloc)
 # --- Facade Functions ---
 
 def read_famfile(fileloc: str) -> pd.DataFrame:

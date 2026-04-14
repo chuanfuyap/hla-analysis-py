@@ -44,8 +44,6 @@ def makehaplodf(aa_df: pd.DataFrame, basicQC: bool = True) -> tuple[pd.DataFrame
     df = aa_df.copy()
     aminoacids = df.index
 
-    aa_id = df["AA_ID"].unique()
-
     df = df.drop(columns=["AA_ID"]).T
     df["haplo"] = df.apply(lambda x: "".join(x), axis=1)
 
@@ -64,9 +62,6 @@ def makehaplodf(aa_df: pd.DataFrame, basicQC: bool = True) -> tuple[pd.DataFrame
 
     haplo = df.columns
     aminoacids = get_aminoacids(aminoacids, haplo)
-
-    if len(aminoacids) >1:
-        df.columns = aminoacids
 
     return df.sort_index(), aminoacids
 
@@ -231,6 +226,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
         if missing in haplodf.columns or missing2 in haplodf.columns:
             haplodf = haplodf.drop(missing, axis=1)
             haplocount = haplodf.shape[1]
+            haplodf.columns = aalist
             refAA = "missing"
             aalist.append("missing")
         else:
@@ -299,7 +295,7 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
         haplodf.columns = ["solo_amino_acid"]
 
         freq = (haplodf.sum(0) / (haplodf.shape[0] * 2)).values[0]
-        if (freq > 0.01) and (freq < 0.99):
+        if (freq > 0.005) and (freq < 0.995):
             AAcount = 2
             suffix = aadf.index[0].split("_")[-1]
             if len(suffix) == 1:
