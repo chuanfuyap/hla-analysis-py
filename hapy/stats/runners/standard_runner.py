@@ -18,6 +18,8 @@ import time
 import numpy as np
 import pandas as pd
 
+from .logger import get_runner_logger
+
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_y, prepare_covar, make_model_table
@@ -55,91 +57,99 @@ def _maf_from_col(s: pd.Series) -> float:
 
 def _run_standard_one_variant(variant_id: str) -> dict:
     """Module-scope per-variant worker, safe for process pools."""
-    if _STANDARD_STATE is None:
-        raise RuntimeError("Standard worker state has not been initialised.")
+    try:
+        if _STANDARD_STATE is None:
+            raise RuntimeError("Standard worker state has not been initialised.")
 
-    adapter = _STANDARD_STATE["adapter"]
-    hladat = _STANDARD_STATE["hladat"]
-    yser = _STANDARD_STATE["yser"]
-    covdf = _STANDARD_STATE["covdf"]
-    covar_cols = _STANDARD_STATE["covar_cols"]
-    model_type = _STANDARD_STATE["model_type"]
-    variant_filter = _STANDARD_STATE["variant_filter"]
+        adapter = _STANDARD_STATE["adapter"]
+        hladat = _STANDARD_STATE["hladat"]
+        yser = _STANDARD_STATE["yser"]
+        covdf = _STANDARD_STATE["covdf"]
+        covar_cols = _STANDARD_STATE["covar_cols"]
+        model_type = _STANDARD_STATE["model_type"]
+        variant_filter = _STANDARD_STATE["variant_filter"]
 
-    geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
-    geno_cols = list(geno_df.columns)
+        geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
+        geno_cols = list(geno_df.columns)
 
-    if variant_filter is not None:
-        ctx = {
-            "analysis": "standard",
-            "kind": adapter.KIND,
-            "variant_id": variant_id,
-            "meta": meta,
-            "geno_cols": geno_cols,
-        }
-        if not variant_filter(ctx):
-            return {"SKIPPED": True, **meta, "VARIANT": variant_id}
+        if variant_filter is not None:
+            ctx = {
+                "analysis": "standard",
+                "kind": adapter.KIND,
+                "variant_id": variant_id,
+                "meta": meta,
+                "geno_cols": geno_cols,
+            }
+            if not variant_filter(ctx):
+                return {"SKIPPED": True, **meta, "VARIANT": variant_id}
 
-    abt, qc = make_model_table(geno_df, yser, covdf)
+        abt, qc = make_model_table(geno_df, yser, covdf)
 
-    row = dict(meta)
-    row["VARIANT"] = variant_id
-    row.update(qc)
+        row = dict(meta)
+        row["VARIANT"] = variant_id
+        row.update(qc)
 
-    # Only set defaults that are potentially relevant; leave others absent.
-    # We'll clean columns at the end (drop all-empty).
-    if adapter.KIND == "SNP":
-        row.setdefault("MAF", np.nan)
-        row.setdefault("MAF_by_col_str", np.nan)
-    elif adapter.KIND == "HLA":
-        row.setdefault("HLA_AF", np.nan)
-        row.setdefault("HLA_freqs_str", np.nan)
-    elif adapter.KIND == "AA":
-        row.setdefault("AA_AF_by_col_str", np.nan)
+        # Only set defaults that are potentially relevant; leave others absent.
+        # We'll clean columns at the end (drop all-empty).
+        if adapter.KIND == "SNP":
+            row.setdefault("MAF", np.nan)
+            row.setdefault("MAF_by_col_str", np.nan)
+        elif adapter.KIND == "HLA":
+            row.setdefault("HLA_AF", np.nan)
+            row.setdefault("HLA_freqs_str", np.nan)
+        elif adapter.KIND == "AA":
+            row.setdefault("AA_AF_by_col_str", np.nan)
 
-    # Always set model output keys so downstream code can rely on them
-    row.setdefault("LR_p", np.nan)
-    row.setdefault("Anova_p", np.nan)
-    row.setdefault("multi_Coef", np.nan)
-    row.setdefault("Uni_p", np.nan)
-    row.setdefault("Uni_Coef", np.nan)
-    row.setdefault("CI_0.025", np.nan)
-    row.setdefault("CI_0.975", np.nan)
+        # Always set model output keys so downstream code can rely on them
+        row.setdefault("LR_p", np.nan)
+        row.setdefault("Anova_p", np.nan)
+        row.setdefault("multi_Coef", np.nan)
+        row.setdefault("Uni_p", np.nan)
+        row.setdefault("Uni_Coef", np.nan)
+        row.setdefault("CI_0.025", np.nan)
+        row.setdefault("CI_0.975", np.nan)
 
-    if qc["N_used"] == 0 or len(geno_cols) == 0:
+        if qc["N_used"] == 0 or len(geno_cols) == 0:
+            return row
+
+        # frequencies on FINAL modelling rows
+        if adapter.KIND == "SNP":
+            maf_by = {c: _maf_from_col(abt[c]) for c in geno_cols}
+            if len(geno_cols) == 1:
+                row["MAF"] = maf_by[geno_cols[0]]
+            else:
+                row["MAF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in maf_by.items()])
+
+        elif adapter.KIND == "HLA":
+            if len(geno_cols) == 1:
+                row["HLA_AF"] = _af_from_col(abt[geno_cols[0]])
+            else:
+                pieces = []
+                for c in geno_cols:
+                    pieces.append(f"{c}:af={_af_from_col(abt[c]):.6g}")
+                row["HLA_freqs_str"] = ";".join(pieces) if pieces else np.nan
+
+        elif adapter.KIND == "AA":
+            af_by = {c: _af_from_col(abt[c]) for c in geno_cols}
+            row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+
+        # model fits (single-col -> univariate; multi-col -> omnibus)
+        if len(geno_cols) == 1:
+            row.update(fit_univariate(abt, geno_cols[0], covar_cols, model_type))
+            # LR_p/Anova_p/multi_Coef remain NaN
+        else:
+            row.update(fit_omnibus(abt, geno_cols, covar_cols, model_type))
+            # Uni_* remain NaN
+
         return row
-
-    # frequencies on FINAL modelling rows
-    if adapter.KIND == "SNP":
-        maf_by = {c: _maf_from_col(abt[c]) for c in geno_cols}
-        if len(geno_cols) == 1:
-            row["MAF"] = maf_by[geno_cols[0]]
-        else:
-            row["MAF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in maf_by.items()])
-
-    elif adapter.KIND == "HLA":
-        if len(geno_cols) == 1:
-            row["HLA_AF"] = _af_from_col(abt[geno_cols[0]])
-        else:
-            pieces = []
-            for c in geno_cols:
-                pieces.append(f"{c}:af={_af_from_col(abt[c]):.6g}")
-            row["HLA_freqs_str"] = ";".join(pieces) if pieces else np.nan
-
-    elif adapter.KIND == "AA":
-        af_by = {c: _af_from_col(abt[c]) for c in geno_cols}
-        row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
-
-    # model fits (single-col -> univariate; multi-col -> omnibus)
-    if len(geno_cols) == 1:
-        row.update(fit_univariate(abt, geno_cols[0], covar_cols, model_type))
-        # LR_p/Anova_p/multi_Coef remain NaN
-    else:
-        row.update(fit_omnibus(abt, geno_cols, covar_cols, model_type))
-        # Uni_* remain NaN
-
-    return row
-
+    except Exception:
+        logger = get_runner_logger()
+        logger.exception(
+            "standard runner FAILED on variant_id=%r (kind=%s)",
+            variant_id,
+            _STANDARD_STATE["adapter"].KIND if _STANDARD_STATE else "UNKNOWN",
+        )
+        raise
 
 def run_standard(
     adapter,

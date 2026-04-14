@@ -406,7 +406,7 @@ class PLINKRawFileReader(GenomicsFileReader):
     HLAdata
         HLAdat object containing processed dosage data.
     """
-    def __init__(self, plinkrawloc: str, plinkpvarloc: str, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
+    def __init__(self, plinkrawloc: str, plinkpvarloc: str, pvar_rowskip: Optional[int] = None, filter_R2: Optional[str] = None, pvar_R2_column: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
         super().__init__(filter_R2, R2_minimum, simpleQC, load_types)
         self.plinkrawloc = plinkrawloc
         self.plinkpvarloc = plinkpvarloc

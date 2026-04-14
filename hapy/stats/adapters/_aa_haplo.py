@@ -168,6 +168,8 @@ def get_aminoacids(idlist: list[str] | pd.Index, haplotypes: list[str] | pd.Inde
         block = list(aalist[presence])
 
         block = checkAAblock(block)
+        if isinstance(block, list):
+            block = (("").join(block))
         if block:
             aablocks.append(block)
 
@@ -230,6 +232,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
             refAA = "missing"
             aalist.append("missing")
         else:
+            haplodf.columns = aalist
             refix = np.argmax(haplodf.sum())
             refcol = haplodf.columns[refix]
             haplodf = haplodf.drop(refcol, axis=1)
@@ -238,6 +241,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
     else:
         haplodf, aalist = makehaplodf(aadf)
         aalist = list(haplodf.columns.values)
+        haplodf.columns = aalist
 
         if len(aalist) > 1:
             refix = np.argmax(haplodf.sum())
@@ -251,6 +255,8 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
             haplocount = haplodf.shape[1]
             refAA = "missing"
             AAcount = 0
+
+    haplodf.columns = [cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
 
     return haplodf, AAcount, refAA, aalist, haplocount
 
@@ -289,7 +295,7 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
         haplodf = haplodf.drop(refAA, axis=1)
         haplocount = haplodf.shape[1]
 
-        haplodf.columns = ["AA_" + cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
+        haplodf.columns = [cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
     else:
         haplodf = aadf.drop("AA_ID", axis=1).T
         haplodf.columns = ["solo_amino_acid"]

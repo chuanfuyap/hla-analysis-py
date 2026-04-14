@@ -5,4 +5,5 @@ from .data import *
 from .stats import *
 from .vis import *
 
-__version__ = "0.3dev1"
+
+__version__ = "0.3dev5"
