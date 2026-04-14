@@ -413,8 +413,19 @@ class PLINKRawFileReader(GenomicsFileReader):
 
     def read(self) -> HLAdata:
         def file_read_fn(file_path, extra_args):
-            df = pd.read_csv(file_path, sep=r"\s+", index_col=1 ).drop(columns=["FID", "PAT", "MAT","SEX", "PHENOTYPE"])
-            df.columns = header
+            df = pd.read_csv(HLARAW, sep=r"\s+", index_col=1 ).drop(columns=["FID", "PAT", "MAT","SEX", "PHENOTYPE"])
+            df = 2-df # reverse the dosage of ref allele to alt allele which counts presence of amino acids in HLA
+
+            tmpcols = [c.split("_") for c in df.columns]
+            newcols=[]
+            for c in tmpcols:
+                if len(c)==2:
+                    newcols.append(c[0])
+                else:
+                    name = ("_").join(c[:-1])
+                    newcols.append(name)
+
+            df.columns = newcols
             return df
 
         return self._load_and_process(self.plinkrawloc, file_read_fn, "softcall", drop_alleles=True, extra_args=self.phasedfileloc)

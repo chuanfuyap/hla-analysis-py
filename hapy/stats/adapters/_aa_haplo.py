@@ -232,12 +232,14 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
             refAA = "missing"
             aalist.append("missing")
         else:
+            haplo = haplodf.columns
             haplodf.columns = aalist
             refix = np.argmax(haplodf.sum())
             refcol = haplodf.columns[refix]
+            haplo = haplo[refix]
             haplodf = haplodf.drop(refcol, axis=1)
             haplocount = haplodf.shape[1]
-            refAA = getRefAA(refcol, aadf.index)
+            refAA = getRefAA(haplo, aadf.index)
     else:
         haplodf, aalist = makehaplodf(aadf)
         aalist = list(haplodf.columns.values)
