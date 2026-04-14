@@ -16,10 +16,10 @@ Functions:
     - getSampleIDs: Extracts sample IDs from a phased genotype file.
 """
 
-__all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage"]
+__all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage", "read_plinkraw"]
 
 import abc
-from typing import Optional, List, Tuple, Any
+from typing import Optional, List, Tuple, Any, Union
 import pandas as pd
 import numpy as np
 import gc
@@ -80,7 +80,11 @@ def getSampleIDs(phasedfileloc: str) -> List[str]:
         ix = [i for i in range(1, idCount2, 2)]
     return list(sampIDs[ix])
 
-def _apply_r2_filter(df: pd.DataFrame, filter_R2: Optional[str], R2_minimum: float) -> pd.DataFrame:
+def _apply_r2_filter(
+    df: pd.DataFrame,
+    filter_R2: Optional[Union[str, pd.DataFrame]],
+    R2_minimum: float
+) -> pd.DataFrame:
     """
     Filters variants in a DataFrame based on imputation R2 quality threshold.
 
@@ -88,8 +92,10 @@ def _apply_r2_filter(df: pd.DataFrame, filter_R2: Optional[str], R2_minimum: flo
     ----------
     df : pd.DataFrame
         Variant matrix to filter.
-    filter_R2 : Optional[str]
-        File path to .r2 file for variant imputation quality.
+    filter_R2 : Optional[Union[str, pd.DataFrame]]
+        Either:
+        - File path to .r2 file, or
+        - DataFrame with R2 values (index = variant IDs, column 1 = R2)
     R2_minimum : float
         Minimum R2 threshold for filtering.
 
@@ -98,11 +104,27 @@ def _apply_r2_filter(df: pd.DataFrame, filter_R2: Optional[str], R2_minimum: flo
     pd.DataFrame
         Filtered variant dataframe.
     """
-    if filter_R2:
+    if filter_R2 is None:
+        return df
+
+    print("------------------------------", flush=True)
+    print("FILTERING ON IMPUTATION SCORE", flush=True)
+    print("------------------------------", flush=True)
+    # Load or use directly
+    if isinstance(filter_R2, str):
         r2 = pd.read_csv(filter_R2, sep=r"\s+", header=None, index_col=0)
-        safe = r2[r2[1] > R2_minimum].index
-        df = df.loc[safe]
-    return df
+    elif isinstance(filter_R2, pd.DataFrame):
+        r2 = filter_R2
+    else:
+        raise TypeError("filter_R2 must be either a file path (str) or a pandas DataFrame")
+
+    # Validate structure (defensive, avoids silent bugs)
+    if 1 not in r2.columns:
+        raise ValueError("R2 DataFrame must have column '1' containing R2 values")
+
+    # Apply filter
+    safe = r2[r2[1] > R2_minimum].index
+    return df.loc[df.index.intersection(safe)]
 
 def _add_variant_info(df: pd.DataFrame, index_name: str = "SNP") -> pd.DataFrame:
     """
@@ -125,6 +147,83 @@ def _add_variant_info(df: pd.DataFrame, index_name: str = "SNP") -> pd.DataFrame
     df[['AA_ID', 'TYPE', 'GENE', 'AA_POS', 'POS']] = df.apply(lambda x: breakitup(x["SNP"]), axis=1, result_type="expand")
     return df.drop(columns=["SNP"], axis=1)
 
+def _process_plink_raw(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Cleans up PLINK .raw files, which involves flipping allele dosage and renaming the column names.
+    
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing variant data, indexed by sample ID.
+    Returns
+    -------
+    pd.DataFrame
+        DataFrame ready for processing into HLAdat file. 
+    """
+    df = 2-df # reverse the dosage of ref allele to alt allele which counts presence of amino acids in HLA
+
+    tmpcols = [c.split("_") for c in df.columns]
+    newcols=[]
+    for c in tmpcols:
+        if len(c)==2:
+            newcols.append(c[0])
+        else:
+            name = ("_").join(c[:-1])
+            newcols.append(name)
+
+    df.columns = newcols
+
+    return df
+
+def _read_process_pvar(pvarfileloc: str, pvar_rowskip: Optional[int] = None, pvar_R2_column: Optional[str] = None,) -> List[str]:
+    """
+    Extracts sample IDs from the header of a phased genotype file.
+
+    Parameters
+    ----------
+    pvarfileloc : str
+        File path to PLINK .pvar file which contains the variant information. 
+    pvar_rowskip : int
+        Number of rows to skip in the pvar file, needed to skip past rows containing just the information and not variant data.
+    pvar_R2_column : Optional[str] = None
+        Name of info header that stores with R2 value.
+    Returns
+    -------
+    allele_df : pd.DataFrame
+        DataFrame with alleleA and alleleB information. 
+    r2_df : pd.DataFrame
+        DataFrame with R2 information needed for filtering. 
+    """
+    df = pd.read_csv(pvarfileloc, skiprows=pvar_rowskip, sep="\s+")
+
+    s = df["INFO"].str.split(";")
+    long = s.explode()
+
+    kv = long.str.split("=", n=1, expand=True)
+    kv.columns = ["key", "value"]
+    kv["value"] = kv["value"].where(kv["value"].notna(), True)
+
+    wide = kv.pivot(columns="key", values="value")
+    df = df.join(wide)
+
+    if "IMP" in df:
+        df["IMP"] = df["IMP"].fillna(False).astype(bool)
+
+    df = df.set_index("ID")
+
+    allele_df = df[["REF", "ALT"]]
+    allele_df.columns = ["alleleB", "alleleA"]
+    allele_df = allele_df[["alleleA", "alleleB"]]
+
+    if pvar_R2_column:
+        r2_df = df[[pvar_R2_column]].copy()
+        r2_df.columns = [1]
+        r2_df[1] = pd.to_numeric(r2_df[1], errors="coerce")
+    else:
+        r2_df = None
+
+    return allele_df, r2_df
+
 # --- Abstract Base Reader ---
 
 class GenomicsFileReader(abc.ABC):
@@ -142,7 +241,7 @@ class GenomicsFileReader(abc.ABC):
     load_types : Tuple[str, ...], default ('HLA', 'SNP', 'AA')
         Types of data to load for downstream processing.
     """
-    def __init__(self, filter_R2: Optional[str] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
+    def __init__(self, filter_R2: Optional[Union[str, pd.DataFrame]] = None, R2_minimum: float = 0.5, simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')):
         self.filter_R2 = filter_R2
         self.R2_minimum = R2_minimum
         self.simpleQC = simpleQC
@@ -392,8 +491,12 @@ class PLINKRawFileReader(GenomicsFileReader):
         File path to plink .raw file.
     plinkpvarloc : str
         File path to plink .pvar genotype file (for variant information).
+    pvar_rowskip : Optional[int], default None
+        Number of rows to skip in the pvar file, needed to skip past rows containing just the information and not variant data.
     filter_R2 : Optional[str], default None
-        File path for R2 filtering.
+        Name of info containing the R2 information, e.g. DR2
+    pvar_R2_column : Optional[str] = None
+        Name of info header that stores with R2 value.
     R2_minimum : float, default 0.5
         R2 threshold.
     simpleQC : bool, default True
@@ -410,25 +513,32 @@ class PLINKRawFileReader(GenomicsFileReader):
         super().__init__(filter_R2, R2_minimum, simpleQC, load_types)
         self.plinkrawloc = plinkrawloc
         self.plinkpvarloc = plinkpvarloc
+        self.pvar_R2_column = pvar_R2_column
+        self.pvar_rowskip = pvar_rowskip
 
     def read(self) -> HLAdata:
         def file_read_fn(file_path, extra_args):
-            df = pd.read_csv(HLARAW, sep=r"\s+", index_col=1 ).drop(columns=["FID", "PAT", "MAT","SEX", "PHENOTYPE"])
-            df = 2-df # reverse the dosage of ref allele to alt allele which counts presence of amino acids in HLA
+            df = pd.read_csv(file_path, sep=r"\s+", index_col=1 ).drop(columns=["FID", "PAT", "MAT","SEX", "PHENOTYPE"])
 
-            tmpcols = [c.split("_") for c in df.columns]
-            newcols=[]
-            for c in tmpcols:
-                if len(c)==2:
-                    newcols.append(c[0])
-                else:
-                    name = ("_").join(c[:-1])
-                    newcols.append(name)
+            df = _process_plink_raw(df)
 
-            df.columns = newcols
+            allele_df, r2_df = _read_process_pvar(extra_args["pvar_path"],
+                                                    pvar_rowskip=extra_args["rowskip"],
+                                                    pvar_R2_column=extra_args["r2_col"],)
+            
+            df = pd.concat([allele_df, df.T], axis=1)
+            
+            if extra_args["r2_col"]:
+                self.filter_R2 = r2_df
+
             return df
 
-        return self._load_and_process(self.plinkrawloc, file_read_fn, "softcall", drop_alleles=True, extra_args=self.phasedfileloc)
+        return self._load_and_process(self.plinkrawloc, file_read_fn, "softcall", drop_alleles=True, 
+                                                                                        extra_args={
+                                                                                        "pvar_path": self.plinkpvarloc,
+                                                                                        "rowskip": self.pvar_rowskip,
+                                                                                        "r2_col": self.pvar_R2_column,
+    })
 # --- Facade Functions ---
 
 def read_famfile(fileloc: str) -> pd.DataFrame:
@@ -523,3 +633,34 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
         HLAdat object with dosage data as dataframes.
     """
     return DosageFileReader(dosagefileloc, phasedfileloc, filter_R2, R2_minimum, simpleQC, load_types).read()
+
+def read_plinkraw(plinkrawloc: str, plinkpvarloc: str, pvar_rowskip: Optional[int] = None, filter_R2: Optional[str] = None, pvar_R2_column: Optional[str] = None, 
+                R2_minimum: float = 0.5,  simpleQC: bool = True, load_types: Tuple[str, ...] = ('HLA', 'SNP', 'AA')) -> HLAdata:
+    """
+    Reader for PLINK .raw files, i.e. files generated from PLINK using `-export A`.
+
+    Parameters
+    ----------
+    plinkrawloc : str
+        File path to plink .raw file.
+    plinkpvarloc : str
+        File path to plink .pvar genotype file (for variant information).
+    pvar_rowskip : Optional[int], default None
+        Number of rows to skip in the pvar file, needed to skip past rows containing just the information and not variant data.
+    filter_R2 : Optional[str], default None
+        Name of info containing the R2 information, e.g. DR2
+    pvar_R2_column : Optional[str] = None
+        Name of info header that stores with R2 value.
+    R2_minimum : float, default 0.5
+        R2 threshold.
+    simpleQC : bool, default True
+        Whether to apply MAF filter.
+    load_types : Tuple[str, ...], default ('HLA', 'SNP', 'AA')
+        Types of data to load.
+
+    Returns
+    -------
+    HLAdata
+        HLAdat object containing processed dosage data.
+    """
+    return PLINKRawFileReader(plinkrawloc, plinkpvarloc, pvar_rowskip, filter_R2, pvar_R2_column, R2_minimum, simpleQC, load_types).read()

@@ -26,10 +26,10 @@ _KIND_MAP = {"AA": AAAdapter, "HLA": HLAAdapter, "SNP": SNPAdapter}
 
 def analyse(
     hladat,
-    famfile: pd.DataFrame,
     config: StandardConfig,
     *,
     kind: str,
+    famfile: pd.DataFrame=None,
     covar=None,
     y=None,
     variant_filter=None,
@@ -95,8 +95,8 @@ def analyse(
     return run_standard(
         adapter,
         hladat,
-        famfile,
         config,
+        famfile,
         covar=covar,
         y=y,
         variant_filter=variant_filter,

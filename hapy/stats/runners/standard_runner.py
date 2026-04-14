@@ -154,8 +154,8 @@ def _run_standard_one_variant(variant_id: str) -> dict:
 def run_standard(
     adapter,
     hladat,
-    famfile: pd.DataFrame,
     config,
+    famfile: pd.DataFrame=None,
     covar=None,
     y=None,
     variant_filter=None,

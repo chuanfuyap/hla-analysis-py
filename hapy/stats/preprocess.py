@@ -75,7 +75,10 @@ def prepare_y(famfile: pd.DataFrame, y=None) -> pd.Series:
     -----
     Missing values are allowed; missing Y samples will be dropped during modelling.
     """
-    ix = fam_index(famfile)
+    if famfile is not None:
+        ix = fam_index(famfile)
+    else: 
+        ix = y.index
 
     if y is None:
         fam = famfile[["IID", "PHENO"]].copy()
