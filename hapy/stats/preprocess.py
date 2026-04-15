@@ -172,7 +172,9 @@ def subset_samples_beagle_orientation(data: pd.DataFrame, sample_ids: pd.Index, 
     else:
         raise ValueError(f"Unknown call_type={call_type}")
 
-    return df[cols]
+    tmp_ids = df.columns.intersection(cols)
+
+    return df[tmp_ids]
 
 
 def _case_control_counts(abt: pd.DataFrame) -> dict:
