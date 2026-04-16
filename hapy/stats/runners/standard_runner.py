@@ -129,9 +129,9 @@ def _run_standard_one_variant(variant_id: str) -> dict:
                     pieces.append(f"{c}:af={_af_from_col(abt[c]):.6g}")
                 row["HLA_freqs_str"] = ";".join(pieces) if pieces else np.nan
 
-        elif adapter.KIND == "AA":
-            af_by = {c: _af_from_col(abt[c]) for c in geno_cols}
-            row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+        # elif adapter.KIND == "AA":
+        #     af_by = {c: _af_from_col(abt[c]) for c in geno_cols}
+        #     row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
 
         # model fits (single-col -> univariate; multi-col -> omnibus)
         if len(geno_cols) == 1:
@@ -210,7 +210,6 @@ def run_standard(
     )
 
     rows: list[dict] = []
-    # NOTE: if your parallel.py supports init_cb/init_cb_args, pass them here.
     for r in parallel_imap_batched(
         _run_standard_one_variant,
         variant_ids,
@@ -218,8 +217,6 @@ def run_standard(
         config.backend,
         batch_size=getattr(config, "batch_size", 32),
         max_in_flight=getattr(config, "chunksize", None),  # chunksize == max in-flight batches
-        # init_cb=_init_standard_worker,
-        # init_cb_args=(state,),
     ):
         rows.append(r)
         if prog is not None:

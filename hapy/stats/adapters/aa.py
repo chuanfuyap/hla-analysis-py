@@ -24,10 +24,35 @@ which is suitable for omnibus testing.
 
 from __future__ import annotations
 import pandas as pd
+import numpy as np 
 
 from ..preprocess import subset_samples_beagle_orientation
 from ._aa_haplo import obt_haplo_soft, obt_haplo_hard
 
+
+def _af_from_col(s: pd.Series) -> float:
+    """Compute allele frequency estimate p = mean(dosage)/2."""
+    return float(s.mean() / 2.0)
+
+def aa_allele_frequency(aminoacid_df):
+    """
+    Computes the allele frequency of the amio acids in the variant.
+
+    Parameters
+    ----------
+    aminoacid_df:
+        The pd.DataFrame that contains the amino acid counts.
+
+    Returns
+    -------
+    af_str:
+        AF for each amino acid present in the variant.
+    """
+    df = aminoacid_df.drop(columns=["AA_ID"]).copy()
+
+    tmp = {c.split("_")[-1].replace(".", "dot").replace("*", "asterisk"): _af_from_col(df.T[c]) for c in df.T.columns}
+    
+    return ";".join([f"{k}={v:.6g}" for k, v in tmp.items()]) if tmp else np.nan
 
 class AAAdapter:
     """Adapter for HLAdat.AA genotype block."""
@@ -75,6 +100,7 @@ class AAAdapter:
             Dict of annotations useful for output tables.
         """
         df = hladat.AA.data.copy()
+        
         info = hladat.AA.info.copy()
 
         df.index = df.index.astype(str)
@@ -99,5 +125,7 @@ class AAAdapter:
             "Amino_Acids": ", ".join(sorted({str(x) for x in aalist})),
             "Ref_AA": refAA,
             "AAcount": AAcount,
+            "AA_AF": aa_allele_frequency(aadf)
         }
+
         return haplodf, meta

@@ -247,19 +247,19 @@ def fit_block_omnibus_interaction(
     out: dict = {
         "LR_p": float(lrp),
         "Anova_p": float(fp),
-        "n_I": len(present),
-        "I_terms": ",".join(present) if present else None,
+    #    "n_I": len(present),
+    #    "I_terms": ",".join(present) if present else None,
     }
 
-    if present:
-        beta = alt.params.loc[present]
-        cov = alt.cov_params().loc[present, present]
+    # if present:
+    #     beta = alt.params.loc[present]
+    #     cov = alt.cov_params().loc[present, present]
 
-        for t in present:
-            out[f"beta_{t}"] = float(beta[t])
+    #     for t in present:
+    #         out[f"beta_{t}"] = float(beta[t])
 
-        for t1 in present:
-            for t2 in present:
-                out[f"cov_{t1}__{t2}"] = float(cov.loc[t1, t2])
+    #     for t1 in present:
+    #         for t2 in present:
+    #             out[f"cov_{t1}__{t2}"] = float(cov.loc[t1, t2])
 
     return out

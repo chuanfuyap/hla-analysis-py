@@ -396,8 +396,8 @@ def run_interaction(
 
             # Compute allele frequency summary for the AA block columns
             # using only the final analysis table rows
-            af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-            row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+            # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
+            # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
 
             # Fit omnibus interaction model:
             # anchor_col x all block_cols jointly
@@ -451,8 +451,8 @@ def run_interaction(
             return row
 
         # Compute AF summary for the AA block columns on final modelling rows
-        af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-        row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+        # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
+        # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
 
         # Fit omnibus interaction model:
         # anchor_col x all block_cols jointly

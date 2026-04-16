@@ -83,21 +83,21 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     out = {
         "LR_p": float(lrp),
         "Anova_p": float(fp),
-        "n_geno": len(present),
-        "geno_terms": ",".join(present) if present else None,
+        #"n_geno": len(present),
+        #"geno_terms": ",".join(present) if present else None,
     }
 
-    if present:
-        beta = alt.params.loc[present]
-        cov = alt.cov_params().loc[present, present]
+    # if present:
+    #     beta = alt.params.loc[present]
+    #     cov = alt.cov_params().loc[present, present]
 
-        # flatten beta
-        for g in present:
-            out[f"beta_{g}"] = float(beta[g])
+    #     # flatten beta
+    #     for g in present:
+    #         out[f"beta_{g}"] = float(beta[g])
 
-        # flatten covariance (full matrix, not just upper triangle)
-        for g1 in present:
-            for g2 in present:
-                out[f"cov_{g1}__{g2}"] = float(cov.loc[g1, g2])
+    #     # flatten covariance (full matrix, not just upper triangle)
+    #     for g1 in present:
+    #         for g2 in present:
+    #             out[f"cov_{g1}__{g2}"] = float(cov.loc[g1, g2])
 
     return out
