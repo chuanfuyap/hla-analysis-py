@@ -52,7 +52,12 @@ def aa_allele_frequency(aminoacid_df):
 
     tmp = {c.split("_")[-1].replace(".", "dot").replace("*", "asterisk"): _af_from_col(df.T[c]) for c in df.T.columns}
     
-    return ";".join([f"{k}={v:.6g}" for k, v in tmp.items()]) if tmp else np.nan
+    aa_freq = {}
+    for k, v in tmp.items():
+        if len(k)==1:
+            aa_freq[k]=v
+    
+    return ";".join([f"{k}={v:.6g}" for k, v in aa_freq.items()]) if aa_freq else np.nan
 
 class AAAdapter:
     """Adapter for HLAdat.AA genotype block."""
