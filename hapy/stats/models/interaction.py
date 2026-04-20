@@ -230,8 +230,8 @@ def fit_block_omnibus_interaction(
     alt = _fit(altf, abt, model_type)
     nul = _fit(nullf, abt, model_type)
 
-    _lrstat, lrp = lrtest(nul, alt)
-    _fstat, fp = anova(nul, alt, abt["Y"], model_type)
+    lrstat, lrp, dof = lrtest(nul, alt)
+    #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 
     # Find the interaction coefficients actually present in the fitted model.
     # This is safer than assuming the raw formula strings match alt.params.index exactly.
@@ -246,7 +246,9 @@ def fit_block_omnibus_interaction(
 
     out: dict = {
         "LR_p": float(lrp),
-        "Anova_p": float(fp),
+        "LR_stat": float(lrstat),
+        "DoF" : int(dof)
+    #    "Anova_p": float(fp),
     #    "n_I": len(present),
     #    "I_terms": ",".join(present) if present else None,
     }

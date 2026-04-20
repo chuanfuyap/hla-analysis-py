@@ -53,7 +53,8 @@ def lrtest(nullmodel, altmodel):
     dof = all_dof - null_dof
 
     p = stats.chi2.sf(lr, dof)
-    return lr, p
+
+    return lr, p, dof
 
 
 def deviance(ytrue, model):
