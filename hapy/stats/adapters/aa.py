@@ -34,7 +34,15 @@ def _af_from_col(s: pd.Series) -> float:
     """Compute allele frequency estimate p = mean(dosage)/2."""
     return float(s.mean() / 2.0)
 
-def aa_allele_frequency(aminoacid_df):
+def _af_from_col_hard(s: pd.Series) -> float:
+    """Compute allele frequency estimate by counting number of presence."""
+    s = s.dropna()
+    if len(s) == 0:
+        return float("nan")
+    p_A = (s == "A").mean()
+    return 1.0 - p_A
+
+def aa_allele_frequency(aminoacid_df, calltype):
     """
     Computes the allele frequency of the amio acids in the variant.
 
@@ -42,6 +50,8 @@ def aa_allele_frequency(aminoacid_df):
     ----------
     aminoacid_df:
         The pd.DataFrame that contains the amino acid counts.
+    calltype:
+        "softcall" or "hardcall".
 
     Returns
     -------
@@ -50,7 +60,10 @@ def aa_allele_frequency(aminoacid_df):
     """
     df = aminoacid_df.drop(columns=["AA_ID"]).copy()
 
-    tmp = {c.split("_")[-1].replace(".", "dot").replace("*", "asterisk"): _af_from_col(df.T[c]) for c in df.T.columns}
+    if calltype=="softcall":
+        tmp = {c.split("_")[-1].replace(".", "dot").replace("*", "asterisk"): _af_from_col(df.T[c]) for c in df.T.columns}
+    else:
+        tmp = {c.split("_")[-1].replace(".", "dot").replace("*", "asterisk"): _af_from_col_hard(df.T[c]) for c in df.T.columns}
     
     aa_freq = {}
     for k, v in tmp.items():
@@ -130,7 +143,7 @@ class AAAdapter:
             "Amino_Acids": ", ".join(sorted({str(x) for x in aalist})),
             "Ref_AA": refAA,
             "AAcount": AAcount,
-            "AA_AF": aa_allele_frequency(aadf)
+            "AA_AF": aa_allele_frequency(aadf, hladat.type)
         }
 
         return haplodf, meta
