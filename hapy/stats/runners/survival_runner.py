@@ -76,7 +76,7 @@ def _run_survival_one_variant(variant_id: str) -> dict:
     #row.update(qc)
 
     if qc["N_used"] == 0 or len(geno_cols) == 0:
-        row.update({"LR_p": np.nan, "p": np.nan, "HR": np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
+        row.update({"LR_p": np.nan, "p": np.nan, "HR": np.nan,"StdErr":np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
         return row
 
     # Frequencies on FINAL modelling rows
@@ -121,7 +121,7 @@ def _run_survival_one_variant(variant_id: str) -> dict:
     null_ll = float(nul.log_likelihood_)
 
     row["LR_p"] = lrtest_cox(alt_ll, null_ll, dof=len(geno_cols))
-    row.update({"p": np.nan, "HR": np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
+    row.update({"p": np.nan, "HR": np.nan,"StdErr":np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
     return row
 
 
