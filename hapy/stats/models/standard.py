@@ -46,6 +46,7 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
     return {
         "Uni_p": float(m.pvalues[geno_col]),
         "Uni_Coef": round(float(m.params[geno_col]), 3),
+        "Uni_StdErr": round(float(m.bse[geno_col]), 3),
         "CI_0.025": float(ci[0]),
         "CI_0.975": float(ci[1]),
     }
