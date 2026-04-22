@@ -106,6 +106,7 @@ def _run_standard_one_variant(variant_id: str) -> dict:
         row.setdefault("multi_Coef", np.nan)
         row.setdefault("Uni_p", np.nan)
         row.setdefault("Uni_Coef", np.nan)
+        row.setdefault("Uni_StdErr", np.nan)
         row.setdefault("CI_0.025", np.nan)
         row.setdefault("CI_0.975", np.nan)
 

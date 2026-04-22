@@ -29,7 +29,7 @@ def fit_cox_univariate(cox_df: pd.DataFrame, feature: str) -> dict:
 
     if feature not in cph.summary.index:
         # can happen if feature got dropped (collinear) or name mismatch
-        return {"p": np.nan, "HR": np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan}
+        return {"p": np.nan, "HR": np.nan, "StdErr": np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan}
 
     s = cph.summary.loc[feature]
     return {
