@@ -11,10 +11,10 @@ Contract
 Output
 ------
 geno_df:
-  - index: IID strings
-  - columns: numeric genotype features (dosage/copy number)
+    - index: IID strings
+    - columns: numeric genotype features (dosage/copy number)
 meta:
-  - dict with VARIANT and other informative fields (GENE, AA_POS, Ref_AA, etc.)
+    - dict with VARIANT and other informative fields (GENE, AA_POS, Ref_AA, etc.)
 
 Notes
 -----
@@ -102,9 +102,9 @@ class AAAdapter:
         ----------
         hladat:
             HLAdat object with fields:
-              - hladat.AA.data: variants x samples
-              - hladat.AA.info: variant annotations including AA_ID
-              - hladat.type: "softcall" or "hardcall"
+                - hladat.AA.data: variants x samples
+                - hladat.AA.info: variant annotations including AA_ID
+                - hladat.type: "softcall" or "hardcall"
         variant_id:
             AA_ID key to subset.
         sample_index:
