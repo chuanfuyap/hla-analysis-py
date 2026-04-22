@@ -35,6 +35,7 @@ def fit_cox_univariate(cox_df: pd.DataFrame, feature: str) -> dict:
     return {
         "p": float(s["p"]),
         "HR": float(s["exp(coef)"]),
+        "StdErr": float(s["se(coef)"]),
         "CI_0.025": float(s["exp(coef) lower 95%"]),
         "CI_0.975": float(s["exp(coef) upper 95%"]),
     }
