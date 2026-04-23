@@ -64,6 +64,8 @@ class SNPAdapter:
 
         meta = {
             "VARIANT": variant_id,
+            "alleleA" : snpinfo["alleleA"],
+            "alleleB" : snpinfo["alleleB"],
             "POS": snpinfo["POS"].iloc[0] if "POS" in snpinfo else None,
         }
         return geno, meta

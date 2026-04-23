@@ -145,6 +145,20 @@ def run_survival(
     iid_index = pd.Index(famfile["IID"].astype(str), name="IID")
     covdf = prepare_covar(covar, iid_index)
     variant_ids = list(adapter.iter_variants(hladat))
+    if variant_filter is not None:
+        block = getattr(hladat, kind)
+        info_df = block.info
+        filtered = []
+        for vid in variant_ids:
+            if "AA_ID" in info_df.columns:
+                row = info_df[info_df["AA_ID"] == vid]
+            else:
+                row = info_df[info_df.index == vid]
+            meta = row.iloc[0].to_dict() if len(row) > 0 else {}
+            ctx = {"analysis": "survival", "kind": kind, "variant_id": vid, "meta": meta, "geno_cols": []}
+            if variant_filter(ctx):
+                filtered.append(vid)
+        variant_ids = filtered
 
     if verbose:
         print("----------------", flush=True)

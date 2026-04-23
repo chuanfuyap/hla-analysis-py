@@ -12,7 +12,7 @@ from .io import read_input_files
 from .combine import inv_var_meta_studies, stouffers_meta_studies
 
 
-def meta_analyse(fileloc, data_type,  beta='Uni_Coef', se="SE", pval="LR_p", variant_col="VARIANT", prefix="META"):
+def meta_analyse(fileloc, data_type,  beta='Uni_Coef', se="Uni_StdErrs", pval="LR_p", variant_col="VARIANT", prefix="META"):
     t0 = time.perf_counter()
     inv_var, stouffers = read_input_files(fileloc, data_type)
 

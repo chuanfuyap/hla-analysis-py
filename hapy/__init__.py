@@ -7,4 +7,4 @@ from .vis import *
 from .meta import *
 
 
-__version__ = "0.5dev3"
+__version__ = "0.5dev6"
