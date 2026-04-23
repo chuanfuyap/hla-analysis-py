@@ -107,11 +107,11 @@ def analyse(
 
 def interaction(
     hladat,
-    famfile: pd.DataFrame,
     config: InteractionConfig,
     *,
     a_kind: str,
     b_kind: str,
+    famfile: pd.DataFrame=None,
     covar=None,
     y=None,
     pair_filter=None,

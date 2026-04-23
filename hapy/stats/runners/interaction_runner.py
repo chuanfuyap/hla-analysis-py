@@ -33,10 +33,10 @@ def run_interaction(
     adapter_a,
     adapter_b,
     hladat,
-    famfile: pd.DataFrame,
     config,
     a_kind: str,
     b_kind: str,
+    famfile: pd.DataFrame=None,
     covar=None,
     y=None,
     pair_filter=None,
@@ -115,6 +115,7 @@ def run_interaction(
     if b_kind == "COV":
         b_blocks = {"COV_BLOCK": (covdf[cov_block_cols].copy(), {"VARIANT": "COV_BLOCK"})}
     elif b_kind == "DF":
+        
         b_blocks = {"DF_BLOCK": (block_b_df.copy(), {"VARIANT": "DF_BLOCK"})}
     else:
         b_ids = list(adapter_b.iter_variants(hladat))
@@ -497,4 +498,8 @@ def run_interaction(
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")
+    try: 
+        out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p").head()
+    except:
+        None
     return out

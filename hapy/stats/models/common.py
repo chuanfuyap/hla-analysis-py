@@ -129,4 +129,6 @@ def categorical_term(col: str, dtype) -> str:
     """
     if getattr(dtype, "name", "") in ("object", "category", "string"):
         return f"C({col})"
+    if not col.isidentifier():
+        return f'Q("{col}")'
     return col
