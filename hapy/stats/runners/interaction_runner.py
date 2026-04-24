@@ -175,9 +175,16 @@ def run_interaction(
 
             if abt.shape[0] == 0:
                 row.update(
-                    {
+                    {   
+                        "A_p": np.nan,
+                        "A_coef": np.nan,
+                        "A_StdErr": np.nan, 
+                        "B_p": np.nan,
+                        "B_coef": np.nan,
+                        "B_StdErr": np.nan, 
                         "I_p": np.nan,
                         "I_coef": np.nan,
+                        "I_StdErr": np.nan, 
                         "I_CI_0.025": np.nan,
                         "I_CI_0.975": np.nan,
                         "LR_p": np.nan,
