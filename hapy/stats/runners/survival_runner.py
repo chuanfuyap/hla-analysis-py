@@ -32,6 +32,18 @@ from ..models.survival import fit_cox_univariate, lrtest_cox
 
 _SURVIVAL_STATE: dict | None = None
 
+def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
+    df = dataframe.copy()
+    if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
+        df = df.drop(columns = ['N_missing_Y'])
+    if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
+        df = df.drop(columns = ['N_dropped_other'])
+    if df.N_used.unique()[0]==df.N_total.unique()[0]:
+        df = df.drop(columns = ['N_used'])
+
+    df = df.dropna(axis=1, how="all")
+
+    return df
 
 def _init_survival_worker(state: dict) -> None:
     global _SURVIVAL_STATE
@@ -207,7 +219,7 @@ def run_survival(
     for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str"):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
-    out = out.dropna(axis=1, how="all")
+    out = _clean_output(out)
 
     if verbose:
         print(f"survival[{kind}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)

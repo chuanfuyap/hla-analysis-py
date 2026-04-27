@@ -28,6 +28,19 @@ def _af_safe(series: pd.Series) -> float:
         return np.nan
     return float(series.mean() / 2.0)
 
+def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
+    df = dataframe.copy()
+    if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
+        df = df.drop(columns = ['N_missing_Y'])
+    if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
+        df = df.drop(columns = ['N_dropped_other'])
+    if df.N_used.unique()[0]==df.N_total.unique()[0]:
+        df = df.drop(columns = ['N_used'])
+
+    df = df.dropna(axis=1, how="all")
+
+    return df
+
 
 def run_interaction(
     adapter_a,
@@ -223,6 +236,8 @@ def run_interaction(
             prog.close()
 
         out = pd.DataFrame(rows)
+        out = _clean_output(out)
+        out = out.drop(columns=['A_col', 'B_variant','A_VARIANT', 'B_VARIANT',])
 
         if verbose:
             print(f"interaction[pairwise] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
@@ -509,4 +524,8 @@ def run_interaction(
         out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p").head()
     except:
         None
+
+    out = _clean_output(out)
+    out = out.drop(columns=['Anchor_variant', "AA_variant","Anchor_VARIANT"])
+
     return out
