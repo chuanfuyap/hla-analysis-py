@@ -405,12 +405,15 @@ def run_interaction(
                     "Anchor_variant": b_id,    # identifier for anchor variant
                     "Anchor_col": anchor_col,  # actual anchor column tested
                     "AA_AF_by_col_str": np.nan,
+                    "B_AF": np.nan,
                     # Prefix metadata from the AA block side
                     **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
                     # Prefix metadata from the anchor side
                     **{f"Anchor_{k}": v for k, v in b_meta.items() if k != "AAcount"},
                 }
             )
+
+            row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
             # If no rows remain after merging / NA filtering, return empty stats
             if abt.shape[0] == 0:
@@ -461,12 +464,15 @@ def run_interaction(
                 "Anchor_variant": a_id,    # identifier for anchor variant
                 "Anchor_col": anchor_col,  # actual anchor column tested
                 "AA_AF_by_col_str": np.nan,
+                "A_AF": np.nan,
                 # Prefix metadata from anchor side
                 **{f"Anchor_{k}": v for k, v in a_meta.items() if k != "AAcount"},
                 # Prefix metadata from AA block side
                 **{f"AA_{k}": v for k, v in b_meta.items() if k != "AAcount"},
             }
         )
+
+        row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
         # If analysis table is empty, return row with NA stats
         if abt.shape[0] == 0:
