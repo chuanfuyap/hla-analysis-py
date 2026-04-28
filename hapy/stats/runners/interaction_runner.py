@@ -527,7 +527,7 @@ def run_interaction(
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")
     try: 
-        out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p").head()
+        out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p")
     except:
         None
 
