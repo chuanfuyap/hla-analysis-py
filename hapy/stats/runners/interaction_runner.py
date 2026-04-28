@@ -134,9 +134,9 @@ def run_interaction(
         b_ids = list(adapter_b.iter_variants(hladat))
         b_blocks = {vid: adapter_b.build_geno(hladat, vid, sample_index=yser.index) for vid in b_ids}
 
-    # ============================
-    # Pairwise mode (C1 long)
-    # ============================
+    # ==============
+    # Pairwise mode 
+    # ==============
     if config.mode == "pairwise":
         tasks: list[tuple[str, str, str, str]] = []
         for a_id, (a_df, a_meta) in a_blocks.items():
