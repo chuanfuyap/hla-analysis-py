@@ -33,7 +33,7 @@ from ..models.standard import fit_univariate, fit_omnibus
 _STANDARD_STATE: dict | None = None
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
-    df = dataframe.copy()
+    df = dataframe
     if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
         df = df.drop(columns = ['N_missing_Y'])
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:

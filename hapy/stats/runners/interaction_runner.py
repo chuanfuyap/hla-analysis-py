@@ -29,7 +29,7 @@ def _af_safe(series: pd.Series) -> float:
     return float(series.mean() / 2.0)
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
-    df = dataframe.copy()
+    df = dataframe
     if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
         df = df.drop(columns = ['N_missing_Y'])
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
