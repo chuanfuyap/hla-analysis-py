@@ -18,6 +18,13 @@ def _compute_se(study: pd.DataFrame) -> pd.DataFrame:
     study["SE"] = (study["CI_0.975"] - study["CI_0.025"]) / (2 * _Z_CI)
     return study[study["SE"] > 0]
 
+
+def _compute_se_interaction(study: pd.DataFrame) -> pd.DataFrame:
+    """Derive SE from 95% CI and filter out non-positive SEs."""
+    study = study.copy()
+    study["SE"] = (study["I_CI_0.975"] - study["I_CI_0.025"]) / (2 * _Z_CI)
+    return study[study["SE"] > 0]
+
 def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split AA results into IVW (univariate, LR_p null) and
@@ -27,7 +34,11 @@ def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, p
     if interaction:
         study["INTERACTION"] = study['AA_VARIANT']+"*" +study['Anchor_col']
 
-    ivw = _compute_se(study[study["LR_p"].isnull()])
+    
+    if interaction:
+        ivw=None
+    else:
+        ivw = _compute_se(study[study["LR_p"].isnull()])
     stouffer = study[study["LR_p"].notnull()]
 
 
@@ -38,7 +49,9 @@ def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFra
     """HLA and SNP results: IVW only, derive SE from CI."""
     if interaction:
         study["INTERACTION"] = study['A_variant']+"*" +study['B_col']
-    return _compute_se(study), None
+        return _compute_se_interaction(study), None
+    else:
+        return _compute_se(study), None
 
 _PROCESSORS = {
     "AA":  _process_aa,
