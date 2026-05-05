@@ -40,6 +40,7 @@ _PROCESSORS = {
 def read_input_files(
     file_loc: str,
     data_type: str,
+    interaction = False, 
 ) -> Tuple[List[pd.DataFrame], List[pd.DataFrame]]:
     """
     Read per-cohort results files and prepare them for meta-analysis.
@@ -66,14 +67,25 @@ def read_input_files(
 
     inv_var_studies, stouffer_studies = [], []
 
-    with open(file_loc, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-        for line in lines:
-            study = pd.read_csv(line.strip())
-            ivw, stouffer = process(study)
+    if interaction:
+        with open(file_loc, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                study = pd.read_csv(line.strip())
+                ivw, stouffer = process(study)
 
-            inv_var_studies.append(ivw)
-            if stouffer is not None and not stouffer.empty:
-                stouffer_studies.append(stouffer)
+                inv_var_studies.append(ivw)
+                if stouffer is not None and not stouffer.empty:
+                    stouffer_studies.append(stouffer)
+    else:
+        with open(file_loc, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+            for line in lines:
+                study = pd.read_csv(line.strip())
+                ivw, stouffer = process(study)
+
+                inv_var_studies.append(ivw)
+                if stouffer is not None and not stouffer.empty:
+                    stouffer_studies.append(stouffer)
 
     return inv_var_studies, stouffer_studies
