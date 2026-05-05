@@ -18,17 +18,26 @@ def _compute_se(study: pd.DataFrame) -> pd.DataFrame:
     study["SE"] = (study["CI_0.975"] - study["CI_0.025"]) / (2 * _Z_CI)
     return study[study["SE"] > 0]
 
-def _process_aa(study: pd.DataFrame) -> Tuple[pd.DataFrame, pd.DataFrame]:
+def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """
     Split AA results into IVW (univariate, LR_p null) and
     Stouffer's (omnibus, LR_p not null) subsets.
     """
+
+    if interaction:
+        study["INTERACTION"] = study['AA_VARIANT']+"*" +study['Anchor_col']
+
     ivw = _compute_se(study[study["LR_p"].isnull()])
     stouffer = study[study["LR_p"].notnull()]
+
+
+
     return ivw, stouffer
 
-def _process_hla_snp(study: pd.DataFrame) -> Tuple[pd.DataFrame, None]:
+def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, None]:
     """HLA and SNP results: IVW only, derive SE from CI."""
+    if interaction:
+        study["INTERACTION"] = study['A_variant']+"*" +study['B_col']
     return _compute_se(study), None
 
 _PROCESSORS = {
@@ -72,7 +81,7 @@ def read_input_files(
             lines = f.readlines()
             for line in lines:
                 study = pd.read_csv(line.strip())
-                ivw, stouffer = process(study)
+                ivw, stouffer = process(study, interaction=True)
 
                 inv_var_studies.append(ivw)
                 if stouffer is not None and not stouffer.empty:

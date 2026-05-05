@@ -17,6 +17,14 @@ def meta_analyse(fileloc, data_type,  beta='Uni_Coef', se="Uni_StdErr", pval="LR
 
     if interaction:
         inv_var, stouffers = read_input_files(fileloc, data_type, interaction=True)
+
+        FE_meta, Stouffers_meta = None, None
+        if inv_var:
+            print("Performing Inverse-Variance Meta-analysis")
+            FE_meta = inv_var_meta_studies(inv_var, beta=beta, se=se, variant_col="INTERACTION", prefix=prefix)
+        if stouffers:
+            print("Performing Stouffer's Method Meta-analysis")
+            Stouffers_meta = stouffers_meta_studies(stouffers, pval=pval, variant_col="INTERACTION", prefix=prefix)
     else:
         inv_var, stouffers = read_input_files(fileloc, data_type)
 
