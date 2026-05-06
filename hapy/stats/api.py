@@ -33,7 +33,7 @@ def analyse(
     covar=None,
     y=None,
     variant_filter=None,
-    condition_on: str | None = None,
+    condition_on: str | list[str] | None = None,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
