@@ -80,9 +80,37 @@ def _run_standard_one_variant(variant_id: str) -> dict:
         covar_cols = _STANDARD_STATE["covar_cols"]
         model_type = _STANDARD_STATE["model_type"]
         variant_filter = _STANDARD_STATE["variant_filter"]
+        condition_on = _STANDARD_STATE["condition_on"]
 
         geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
         geno_cols = list(geno_df.columns)
+
+        covdf_local = covdf.copy() if covdf is not None else None
+        covar_cols_local = list(covar_cols)
+
+        if condition_on is not None:
+            if condition_on == variant_id:
+                return {
+                    **meta,
+                    "VARIANT": variant_id,
+                    "COND_VARIANT": condition_on,
+                    "COND_KIND": adapter.KIND,
+                    "SKIPPED": True,
+                    "Skip_Reason": "tested variant equals conditioning variant",
+                }
+
+            cond_df, _ = adapter.build_geno(hladat, condition_on, sample_index=yser.index)
+
+            # Safety: prevent overlap between tested and conditioning columns
+            cond_df = cond_df.copy()
+            cond_df.columns = [f"COND_{c}" for c in cond_df.columns]
+
+            if covdf_local is None:
+                covdf_local = cond_df
+            else:
+                covdf_local = pd.concat([covdf_local, cond_df], axis=1)
+
+            covar_cols_local.extend(list(cond_df.columns))
 
         if variant_filter is not None:
             ctx = {
@@ -95,10 +123,11 @@ def _run_standard_one_variant(variant_id: str) -> dict:
             if not variant_filter(ctx):
                 return {"SKIPPED": True, **meta, "VARIANT": variant_id}
 
-        abt, qc = make_model_table(geno_df, yser, covdf)
+        abt, qc = make_model_table(geno_df, yser, covdf_local)
 
         row = dict(meta)
         row["VARIANT"] = variant_id
+        row["COND_VARIANT"] = condition_on if condition_on is not None else np.nan
         row.update(qc)
 
         # Only set defaults that are potentially relevant; leave others absent.
@@ -148,10 +177,10 @@ def _run_standard_one_variant(variant_id: str) -> dict:
 
         # model fits (single-col -> univariate; multi-col -> omnibus)
         if len(geno_cols) == 1:
-            row.update(fit_univariate(abt, geno_cols[0], covar_cols, model_type))
+            row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
             # LR_p/Anova_p/multi_Coef remain NaN
         else:
-            row.update(fit_omnibus(abt, geno_cols, covar_cols, model_type))
+            row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type))
             # Uni_* remain NaN
 
         return row
@@ -172,6 +201,7 @@ def run_standard(
     covar=None,
     y=None,
     variant_filter=None,
+    condition_on: str | None = None,
     *,
     verbose: bool = True,
     use_progress_bar: bool = False,
@@ -220,6 +250,7 @@ def run_standard(
         "covar_cols": covar_cols,
         "model_type": config.model_type,
         "variant_filter": variant_filter,
+        "condition_on": condition_on,
     }
 
     # sequential initialization (also used by thread backend)

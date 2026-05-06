@@ -33,6 +33,7 @@ def analyse(
     covar=None,
     y=None,
     variant_filter=None,
+    condition_on: str | None = None,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
@@ -65,6 +66,8 @@ def analyse(
     variant_filter:
         Optional callable(ctx)->bool that can drop variants before fitting.
         Context schema is documented in hapy.stats.filters.
+    condition_on:
+        Optional variant input for conditional analysis
     verbose:
         If True, prints progress messages with flush=True.
     use_progress_bar:
@@ -100,6 +103,7 @@ def analyse(
         covar=covar,
         y=y,
         variant_filter=variant_filter,
+        condition_on=condition_on,
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,
