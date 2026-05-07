@@ -268,6 +268,10 @@ def run_standard(
                 filtered.append(vid)
         variant_ids = filtered
 
+    if condition_on_list:
+        condition_set = set(condition_on_list)
+        variant_ids = [vid for vid in variant_ids if vid not in condition_set]
+
     if verbose:
         print("----------------", flush=True)
         print(f"STARTING ANALYSES on:\t{adapter.KIND}, model={config.model_type}", flush=True)
