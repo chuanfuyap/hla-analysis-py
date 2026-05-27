@@ -236,7 +236,7 @@ def run_interaction(
             prog.close()
 
         out = pd.DataFrame(rows)
-        #out = _clean_output(out)
+        out = _clean_output(out)
         out = out.drop(columns=['A_col', 'B_variant','A_VARIANT', 'B_VARIANT',])
 
         if verbose:

@@ -219,7 +219,7 @@ def run_survival(
     for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str"):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
-    out = _clean_output(out)
+    #out = _clean_output(out)
 
     if verbose:
         print(f"survival[{kind}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
