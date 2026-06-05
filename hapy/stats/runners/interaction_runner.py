@@ -499,13 +499,11 @@ def run_interaction(
                 }
             )
 
-            row["Anchor_AF"] = _af_safe(abt[anchor_col])
-
             # If no rows remain after merging / NA filtering, return empty stats
             if abt.shape[0] == 0:
                 row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
                 return row
-
+            row["Anchor_AF"] = _af_safe(abt[anchor_col])
             # Compute allele frequency summary for the AA block columns
             # using only the final analysis table rows
             # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
@@ -513,7 +511,7 @@ def run_interaction(
 
             # Fit omnibus interaction model:
             # anchor_col x all block_cols jointly
-            row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars, config.model_type))
+            row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
             return row
 
         # B_BLOCK case
@@ -559,12 +557,13 @@ def run_interaction(
             }
         )
 
-        row["Anchor_AF"] = _af_safe(abt[anchor_col])
+
 
         # If analysis table is empty, return row with NA stats
         if abt.shape[0] == 0:
             row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
             return row
+        row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
         # Compute AF summary for the AA block columns on final modelling rows
         # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
@@ -613,10 +612,9 @@ def run_interaction(
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")
-    try:
-        out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p")
-    except Exception:
-        pass
+    
+    if "LR_p" in out.columns:
+        out = out.sort_values("LR_p")
 
     out = _clean_output(out)
     drop_cols = [c for c in ["Anchor_variant", "AA_variant", "Anchor_VARIANT"] if c in out.columns]
