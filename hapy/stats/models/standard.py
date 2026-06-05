@@ -79,7 +79,7 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 
     # Only keep genotype terms that exist in model
-    present = [c for c in geno_cols if c in alt.params.index]
+    # present = [c for c in geno_cols if c in alt.params.index]
 
     out = {
         "LR_p": float(lrp),

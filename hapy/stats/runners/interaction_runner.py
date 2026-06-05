@@ -9,6 +9,11 @@ Pairwise:
 Omnibus:
 - AA-only block omnibus rule enforced
 - includes AA_AF_by_col_str on final modelling rows
+
+Conditional A-side adjustment:
+- optional same-kind condition_on_a variants are built from adapter_a
+- conditioning columns are appended to the covariate dataframe
+- any task whose tested A variant is in condition_on_a is skipped entirely
 """
 
 from __future__ import annotations
@@ -42,6 +47,45 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _normalize_condition_on(condition_on_a) -> list[str]:
+    if condition_on_a is None:
+        return []
+    if isinstance(condition_on_a, str):
+        return [condition_on_a]
+    if isinstance(condition_on_a, (list, tuple, set, pd.Index, np.ndarray)):
+        return [str(x) for x in condition_on_a]
+    raise TypeError("condition_on_a must be None, a string, or a list-like of strings.")
+
+
+def _safe_name(name: str) -> str:
+    return "".join(ch if ch.isalnum() or ch == "_" else "_" for ch in str(name))
+
+
+def _build_condition_covariates(adapter_a, hladat, variant_ids: list[str], sample_index) -> tuple[pd.DataFrame | None, list[str]]:
+    if not variant_ids:
+        return None, []
+
+    parts: list[pd.DataFrame] = []
+    cond_cols: list[str] = []
+
+    for vid in variant_ids:
+        geno_df, _meta = adapter_a.build_geno(hladat, vid, sample_index=sample_index)
+        if geno_df is None or geno_df.shape[1] == 0:
+            continue
+
+        prefix = f"COND_A_{_safe_name(vid)}"
+        renamed = geno_df.copy()
+        renamed.columns = [f"{prefix}__{_safe_name(c)}" for c in renamed.columns]
+        parts.append(renamed)
+        cond_cols.extend(list(renamed.columns))
+
+    if not parts:
+        return None, []
+
+    cond_df = pd.concat(parts, axis=1)
+    return cond_df, cond_cols
+
+
 def run_interaction(
     adapter_a,
     adapter_b,
@@ -56,6 +100,7 @@ def run_interaction(
     cov_block_cols: list[str] | None = None,
     baseline_covar_cols: list[str] | None = None,
     block_b_df: pd.DataFrame | None = None,
+    condition_on_a=None,
     *,
     verbose: bool = True,
     use_progress_bar: bool = False,
@@ -79,6 +124,13 @@ def run_interaction(
         if block_b_df.index.dtype != object:
             block_b_df.index = block_b_df.index.astype(str)
         block_b_df = block_b_df.reindex(yser.index)
+
+    # ----------------------------
+    # Normalize / validate condition_on_a
+    # ----------------------------
+    condition_on_a_list = _normalize_condition_on(condition_on_a)
+    condition_on_a_set = set(condition_on_a_list)
+
 
     # baseline covars
     if b_kind == "COV":
@@ -111,6 +163,8 @@ def run_interaction(
         print("----------------", flush=True)
         print(f"STARTING INTERACTION ANALYSES on:\tmode={config.mode}, model={config.model_type}", flush=True)
         print(f"BLOCKS: A={a_kind}, B={b_kind}", flush=True)
+        if condition_on_a_list:
+            print(f"conditioning on A-side variants: {condition_on_a_list}", flush=True)
         print(
             f"parallel: n_jobs={config.n_jobs}, backend={config.backend}, "
             f"batch_size={getattr(config, 'batch_size', 32)}, chunksize={getattr(config, 'chunksize', None)}",
@@ -123,23 +177,47 @@ def run_interaction(
     # Build blocks (memory-heavy)
     # ----------------------------
     a_ids = list(adapter_a.iter_variants(hladat))
+    a_id_set = set(a_ids)
+
+    missing_condition_ids = [vid for vid in condition_on_a_list if vid not in a_id_set]
+    if missing_condition_ids:
+        raise ValueError(
+            f"condition_on_a contains variant ids not found in A block ({a_kind}): {missing_condition_ids}"
+        )
+
     a_blocks = {vid: adapter_a.build_geno(hladat, vid, sample_index=yser.index) for vid in a_ids}
 
     if b_kind == "COV":
         b_blocks = {"COV_BLOCK": (covdf[cov_block_cols].copy(), {"VARIANT": "COV_BLOCK"})}
     elif b_kind == "DF":
-        
+
         b_blocks = {"DF_BLOCK": (block_b_df.copy(), {"VARIANT": "DF_BLOCK"})}
     else:
         b_ids = list(adapter_b.iter_variants(hladat))
         b_blocks = {vid: adapter_b.build_geno(hladat, vid, sample_index=yser.index) for vid in b_ids}
 
+    cond_df, cond_cols = _build_condition_covariates(
+        adapter_a=adapter_a,
+        hladat=hladat,
+        variant_ids=condition_on_a_list,
+        sample_index=yser.index,
+    )
+
+    if cond_df is not None:
+        covdf_model = cond_df.copy() if covdf is None else pd.concat([covdf, cond_df], axis=1)
+        baseline_covars_model = list(baseline_covars) + cond_cols
+    else:
+        covdf_model = covdf
+        baseline_covars_model = list(baseline_covars)
+
     # ==============
-    # Pairwise mode 
+    # Pairwise mode
     # ==============
     if config.mode == "pairwise":
         tasks: list[tuple[str, str, str, str]] = []
         for a_id, (a_df, a_meta) in a_blocks.items():
+            if a_id in condition_on_a_set:
+                continue
             for b_id, (b_df, b_meta) in b_blocks.items():
                 for ac in a_df.columns:
                     for bc in b_df.columns:
@@ -167,7 +245,7 @@ def run_interaction(
             b_df, b_meta = b_blocks[b_id]
 
             geno = pd.concat([a_df[[ac]], b_df[[bc]]], axis=1)
-            abt, qc = make_model_table(geno, yser, covdf)
+            abt, qc = make_model_table(geno, yser, covdf_model)
 
             row: dict = {}
             row.update(qc)
@@ -188,7 +266,7 @@ def run_interaction(
 
             if abt.shape[0] == 0:
                 row.update(
-                    {   
+                    {
                         "A_p": np.nan,
                         "A_coef": np.nan,
                         "A_StdErr": np.nan, 
@@ -209,7 +287,7 @@ def run_interaction(
             row["A_AF"] = _af_safe(abt[ac])
             row["B_AF"] = _af_safe(abt[bc])
 
-            row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars, config.model_type))
+            row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
             return row
 
         prog = ProgressPrinter(
@@ -237,7 +315,9 @@ def run_interaction(
 
         out = pd.DataFrame(rows)
         out = _clean_output(out)
-        out = out.drop(columns=['A_col', 'B_variant','A_VARIANT', 'B_VARIANT',])
+        drop_cols = [c for c in ["A_col", "B_variant", "A_VARIANT", "B_VARIANT"] if c in out.columns]
+        if drop_cols:
+            out = out.drop(columns=drop_cols)
 
         if verbose:
             print(f"interaction[pairwise] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
@@ -274,6 +354,9 @@ def run_interaction(
         # For each variant in B:
         #   - test each column from B as the anchor
         for a_id, (a_df, a_meta) in a_blocks.items():
+            if a_id in condition_on_a_set:
+                continue
+
             block_cols = list(a_df.columns)
 
             # Skip empty AA blocks
@@ -326,6 +409,8 @@ def run_interaction(
                 continue
 
             for a_id, (a_df, a_meta) in a_blocks.items():
+                if a_id in condition_on_a_set:
+                    continue
                 for anchor_col in a_df.columns:
                     # Build filter context for this candidate anchor/block pair
                     ctx = {
@@ -389,7 +474,7 @@ def run_interaction(
             geno = pd.concat([b_df[[anchor_col]], a_df[block_cols]], axis=1)
 
             # Join genotype data with phenotype/covariates and compute QC
-            abt, qc = make_model_table(geno, yser, covdf)
+            abt, qc = make_model_table(geno, yser, covdf_model)
 
             # Start output row with QC metrics
             row = {}
@@ -406,6 +491,7 @@ def run_interaction(
                     "Anchor_col": anchor_col,  # actual anchor column tested
                     "AA_AF_by_col_str": np.nan,
                     "B_AF": np.nan,
+                    "Anchor_AF": np.nan,
                     # Prefix metadata from the AA block side
                     **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
                     # Prefix metadata from the anchor side
@@ -448,7 +534,7 @@ def run_interaction(
         geno = pd.concat([a_df[[anchor_col]], b_df[block_cols]], axis=1)
 
         # Join genotype data with phenotype/covariates and compute QC
-        abt, qc = make_model_table(geno, yser, covdf)
+        abt, qc = make_model_table(geno, yser, covdf_model)
 
         # Start output row with QC metrics
         row = {}
@@ -465,6 +551,7 @@ def run_interaction(
                 "Anchor_col": anchor_col,  # actual anchor column tested
                 "AA_AF_by_col_str": np.nan,
                 "A_AF": np.nan,
+                "Anchor_AF": np.nan,
                 # Prefix metadata from anchor side
                 **{f"Anchor_{k}": v for k, v in a_meta.items() if k != "AAcount"},
                 # Prefix metadata from AA block side
@@ -485,7 +572,7 @@ def run_interaction(
 
         # Fit omnibus interaction model:
         # anchor_col x all block_cols jointly
-        row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars, config.model_type))
+        row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
         return row
 
 
@@ -526,12 +613,15 @@ def run_interaction(
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")
-    try: 
+    try:
         out = out(columns=['Anchor_variant','Anchor_VARIANT']).sort_values("LR_p")
-    except:
-        None
+    except Exception:
+        pass
 
     out = _clean_output(out)
-    out = out.drop(columns=['Anchor_variant', "AA_variant","Anchor_VARIANT"])
+    drop_cols = [c for c in ["Anchor_variant", "AA_variant", "Anchor_VARIANT"] if c in out.columns]
+    if drop_cols:
+        out = out.drop(columns=drop_cols)
+
 
     return out

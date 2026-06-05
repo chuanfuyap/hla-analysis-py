@@ -121,7 +121,8 @@ def interaction(
     pair_filter=None,
     cov_block_cols: list[str] | None = None,
     baseline_covar_cols: list[str] | None = None,
-    block_b_df: pd.DataFrame | None = None,  # <-- NEW (for b_kind="DF")
+    block_b_df: pd.DataFrame | None = None,  
+    condition_on_a=None,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 500,
@@ -153,6 +154,13 @@ def interaction(
         IMPORTANT RULE: This mode is only supported when AA is one of the blocks
         (regardless of whether AA is on A or B). The anchor side may be genotypes, COV, or DF.
 
+    Conditional A-side adjustment
+    -----------------------------
+    - condition_on_a:
+        Optional same-kind A-side variant(s) to add to the covariate dataframe as adjustment terms.
+        These are built using the same adapter as A.
+        Any task whose tested A variant is itself listed in condition_on_a is skipped entirely.
+
     Parameters
     ----------
     hladat, famfile, covar, y:
@@ -176,6 +184,9 @@ def interaction(
         Required if b_kind="DF".
         IID-indexed dataframe (index must match famfile IID / modelling IID set).
         Columns are treated as block B features (each column interacts with each A column in pairwise mode).
+    condition_on_a:
+        Optional A-side same-kind variant id or list of variant ids to include as conditioning covariates.
+        Any tested task with A_variant in this set is not modeled.
     verbose, use_progress_bar, print_every:
         Progress reporting controls.
 
@@ -223,7 +234,8 @@ def interaction(
         pair_filter=pair_filter,
         cov_block_cols=cov_block_cols,
         baseline_covar_cols=baseline_covar_cols,
-        block_b_df=block_b_df,  # <-- pass through
+        block_b_df=block_b_df,  
+        condition_on_a=condition_on_a,
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,
