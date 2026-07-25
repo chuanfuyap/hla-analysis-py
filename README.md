@@ -101,3 +101,6 @@ For questions, feedback, or collaboration enquiries:
 > University of Manchester
 >
 > chuanfu.yap@manchester.ac.uk
+
+## Citation
+If you use HLA Analysis Py in your research, please cite this repository. If a corresponding publication becomes available, please cite the publication instead.

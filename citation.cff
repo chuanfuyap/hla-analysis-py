@@ -1,0 +1,7 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite it using the information below."
+title: "HLA Analysis Py (hapy)"
+authors:
+  - family-names: "Yap"
+    given-names: "Chuan Fu"
+url: "https://github.com/chuanfuyap/hla-analysis-py"
