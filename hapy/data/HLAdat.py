@@ -99,30 +99,33 @@ class HLAdata:
 
         return SimpleNamespace(**datadict)
 
-    def maf_filter(self, allele_filter: float = 0.005) -> None:
-        """
-        Goes through all HLA allele (4digit/SNP/AA) and perform quality control, removing variants with sample frequency <0.5% (Default)
+    def maf_filter(self, allele_filter: float = 0.005, *,
+                   preserve_missing: bool = False, include_extradata: bool = False) -> None:
+        """Remove variants outside the specified minor allele frequency range.
 
-        allele_filter: float
-            allele frequency (% of alleles across all samples)
+        preserve_missing:
+            For dosage data, calculate frequency from observed samples and retain
+            missing values. False preserves the legacy zero-filling policy.
+        include_extradata:
+            Also filter the separate SNP matrix and align its metadata, if any.
+            False preserves legacy readers' handling of extradata.
         """
-
         if self.type == "hardcall":
-            for name in ["HLA", "SNP", "AA"]:
-                obj = getattr(self, name, None)  # Get attribute if it exists, else None
-                if obj is not None:
-                    obj.data = _qc_hard(obj.data, allele_filter)
-                    obj.info = obj.info.loc[obj.data.index]
-
+            qc = lambda data: _qc_hard(data, allele_filter)
         elif self.type == "softcall":
-            for name in ["HLA", "SNP", "AA"]:
-                obj = getattr(self, name, None)  # Get attribute if it exists, else None
-                if obj is not None:
-                    obj.data = _qc_prob(obj.data, allele_filter)
-                    obj.info = obj.info.loc[obj.data.index]
-
+            qc = lambda data: _qc_prob(data, allele_filter, preserve_missing=preserve_missing)
         else:
             raise ValueError(f"Unknown data type '{self.type}'.")
+
+        for name in ["HLA", "SNP", "AA"]:
+            obj = getattr(self, name, None)
+            if obj is not None:
+                obj.data = qc(obj.data)
+                obj.info = obj.info.loc[obj.data.index]
+                if include_extradata and hasattr(obj, "extradata"):
+                    obj.extradata = qc(obj.extradata)
+                    if hasattr(obj, "extrainfo"):
+                        obj.extrainfo = obj.extrainfo.loc[obj.extradata.index]
 
     def convert_dosage(self):
         """
@@ -155,7 +158,7 @@ def _qc_hard(dataframe: pd.DataFrame, allele_filter: float) -> pd.DataFrame:
 
     return df
 
-def _qc_prob(dataframe: pd.DataFrame, allele_filter: float) -> pd.DataFrame:
+def _qc_prob(dataframe: pd.DataFrame, allele_filter: float, *, preserve_missing: bool = False) -> pd.DataFrame:
     """
     Takes softcall/dosage data and perform maf filter
 
@@ -165,23 +168,23 @@ def _qc_prob(dataframe: pd.DataFrame, allele_filter: float) -> pd.DataFrame:
         Beagle dataset to undergo quality control
     allele_filter: float
         allele frequency (% of alleles across all samples)
+    preserve_missing: bool
+        Use observed dosages as the frequency denominator and retain missing
+        values. False preserves the legacy zero-filling policy.
     Returns
     ------------
     df: Pandas DataFrame
         processed dataset
 
     """
-    df = dataframe.copy().fillna(0)
+    df = dataframe.copy()
+    if preserve_missing:
+        frequency = df.mean(axis=1) / 2.0
+    else:
+        df = df.fillna(0)
+        frequency = df.sum(axis=1) / (df.shape[1] * 2)
+    return df.loc[(frequency > allele_filter) & (frequency < 1 - allele_filter)]
 
-    ### QC allele frequency
-    sample_count = df.shape[1] * 2 # diploid
-    highfreqallele = df.sum(axis=1)/sample_count > allele_filter
-    df = df.loc[highfreqallele]
-    ## this reverse is needed since there is no MAF, it would just be dose of single allele's dose reported, this would remove cases where it is dominated by only one allele
-    highfreqallele_rev = df.sum(axis=1)/sample_count < (1-allele_filter)
-    df = df.loc[highfreqallele_rev]
-
-    return df
 
 def dosage_AA(x: pd.DataFrame) -> float:
     """

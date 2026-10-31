@@ -42,7 +42,7 @@ def _af_from_col_hard(s: pd.Series) -> float:
     p_A = (s == "A").mean()
     return 1.0 - p_A
 
-def aa_allele_frequency(aminoacid_df, calltype, refAA):
+def aa_allele_frequency(aminoacid_df, calltype, refAA, effect_allele=None):
     """
     Computes the allele frequency of the amio acids in the variant.
 
@@ -75,7 +75,8 @@ def aa_allele_frequency(aminoacid_df, calltype, refAA):
     if aa_freq:
         return ";".join([f"{k}={v:.6g}" for k, v in aa_freq.items()])
     else:
-        return f"{refAA}={list(tmp.values())[0]}"
+        label = effect_allele if effect_allele is not None else refAA
+        return f"{label}={list(tmp.values())[0]}"
 
 class AAAdapter:
     """Adapter for HLAdat.AA genotype block."""
@@ -148,7 +149,11 @@ class AAAdapter:
             "Amino_Acids": ", ".join(sorted({str(x) for x in aalist})),
             "Ref_AA": refAA,
             "AAcount": AAcount,
-            "AA_AF": aa_allele_frequency(aadf, hladat.type, refAA)
+            "AA_AF": aa_allele_frequency(
+                aadf, hladat.type, refAA,
+                effect_allele=(aainfo["alleleA"].iloc[0]
+                               if hladat.type == "softcall" and len(aadf) == 1 else None),
+            )
         }
 
         return haplodf, meta
