@@ -92,7 +92,25 @@ hladat = hp.read_bgl(
     load_types=("HLA","AA"), # loads on HLA allele and Amino Acid data
     filter_R2="example.bgl.r2", R2_minimum=0.9) # input imputation confidence and filter
 )
+```
 
+### Accesing data
+
+```python
+# reading amino acid dosage/count data
+hladat.AA.data # returns Amino Acid variant by sample matrix in pandas DataFrame format
+
+hladat.HLA.data # returns HLA allele variant by sample matrix in pandas DataFrame format
+
+hladat.SNP.data # returns SNP variant by sample matrix in pandas DataFrame format
+
+hladat.SNPS.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by sample matrix in pandas DataFrame format 
+
+```
+
+### Running association analyses
+
+```python
 # load pheno and covariate file with pandas (be sure the index have same ID, these are sample IDs )
 pheno = pd.read_csv("example_pheno.txt",index_col=1, )
 covar = pd.read_csv("example_covar.txt", sep="\s+", index_col=1, )
