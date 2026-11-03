@@ -8,7 +8,16 @@ Survival model engine using lifelines.CoxPHFitter.
 from __future__ import annotations
 import numpy as np
 import pandas as pd
-from lifelines import CoxPHFitter
+from lifelines import CoxPHFitter, CoxTimeVaryingFitter
+
+
+def fit_cox_model(cox_df: pd.DataFrame):
+    """Select interval-based fitting when start/stop columns are present."""
+    if {"start", "stop"}.issubset(cox_df.columns):
+        return CoxTimeVaryingFitter().fit(
+            cox_df, id_col="sample_id", start_col="start", stop_col="stop", event_col="event")
+    return CoxPHFitter().fit(
+        cox_df.drop(columns=["sample_id"]), duration_col="time", event_col="event")
 
 
 def fit_cox_univariate(cox_df: pd.DataFrame, feature: str) -> dict:
@@ -22,10 +31,7 @@ def fit_cox_univariate(cox_df: pd.DataFrame, feature: str) -> dict:
     -------
     dict with p, HR, CI_0.025, CI_0.975
     """
-    abt = cox_df.drop(columns=["sample_id"]).copy()
-
-    cph = CoxPHFitter()
-    cph = cph.fit(abt, duration_col="time", event_col="event")
+    cph = fit_cox_model(cox_df)
 
     if feature not in cph.summary.index:
         # can happen if feature got dropped (collinear) or name mismatch

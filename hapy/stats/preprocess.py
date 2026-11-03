@@ -274,80 +274,88 @@ def build_survival_table(
     cov: pd.DataFrame | None = None,
     dynamic_covar: pd.DataFrame | None = None,
 ) -> tuple[pd.DataFrame, dict]:
-    """
-    Build the modelling table for Cox PH survival analysis.
+    """Build static Cox rows, or start/stop intervals for dynamic covariates.
 
-    Parameters
-    ----------
-    geno_df:
-        Feature matrix indexed by IID.
-    event_time:
-        Must contain columns: sample_id, time, event.
-        May be long format (multiple rows per sample).
-    cov:
-        Optional static covariates indexed by IID.
-    dynamic_covar:
-        Optional time-varying covariates with columns including sample_id and time.
-
-    Returns
-    -------
-    cox_df:
-        DataFrame containing:
-          - sample_id, time, event
-          - one-hot encoded covariates/features (drop_first=True)
-    qc:
-        Dict with:
-          - N_total (rows after merges, before dropping NA)
-          - N_dropped_na
-          - N_used
-          - N_event
-          - N_censored
+    event_time has one endpoint per sample: sample_id, time (>0), event (0/1).
+    Dynamic rows describe state changes at nonnegative time, including baseline
+    values at zero. Missing update cells mean no change. Changes at/after the
+    endpoint are ignored. Incomplete subjects are excluded in their entirety;
+    QC sample counts count people, not intervals.
     """
+    from lifelines.utils import to_long_format, add_covariate_to_timeline
+
     et = event_time.copy()
-    for col in ("sample_id", "time", "event"):
-        if col not in et.columns:
-            raise ValueError(f"event_time must contain column '{col}'")
-    et["sample_id"] = et["sample_id"].astype(str)
+    required = ["sample_id", "time", "event"]
+    if not set(required).issubset(et.columns):
+        raise ValueError("event_time must contain sample_id, time, event.")
+    if set(et.columns) != set(required):
+        raise ValueError("Put baseline predictors in covar, not event_time.")
+    et["sample_id"] = sample_index(et["sample_id"], source="Survival endpoints").to_numpy()
+    et["time"] = pd.to_numeric(et["time"], errors="raise")
+    if not np.isfinite(et["time"]).all() or (et["time"] <= 0).any():
+        raise ValueError("Survival endpoint times must be finite and positive.")
+    if not et["event"].isin([0, 1]).all():
+        raise ValueError("Survival event must be 0 or 1.")
 
     base = geno_df.copy()
-    base.index = base.index.astype(str)
-
+    base.index = sample_index(base.index, source="Genotypes")
     if cov is not None:
-        cov2 = cov.copy()
-        cov2.index = cov2.index.astype(str)
-        base = pd.concat([base, cov2], axis=1)
+        cov = cov.copy()
+        cov.index = sample_index(cov.index, source="Covariates")
+        base = pd.concat([base, cov], axis=1)
+    reserved = {"sample_id", "time", "event", "start", "stop"}
+    if not base.columns.is_unique or reserved.intersection(base.columns):
+        raise ValueError("Survival predictor names must be unique and cannot use reserved time/ID columns.")
+    base.index.name = "sample_id"
+    merged = et.merge(base.reset_index(), on="sample_id", how="inner", validate="one_to_one")
+    n_total = len(merged)
+    merged = merged.dropna().copy()
 
-    base = base.reset_index().rename(columns={"index": "sample_id"})
-    merged = pd.merge(et, base, on="sample_id", how="inner")
-
+    dynamic_cols = []
     if dynamic_covar is not None:
         dyn = dynamic_covar.copy()
-        if "sample_id" not in dyn.columns or "time" not in dyn.columns:
-            raise ValueError("dynamic_covar must contain columns ['sample_id','time', ...]")
+        if not {"sample_id", "time"}.issubset(dyn.columns):
+            raise ValueError("dynamic_covar must contain sample_id and time.")
+        dynamic_cols = [c for c in dyn.columns if c not in {"sample_id", "time"}]
+        if not dynamic_cols or not dyn.columns.is_unique:
+            raise ValueError("dynamic_covar must have uniquely named covariate columns.")
+        if (set(dynamic_cols) & (reserved | set(base.columns))):
+            raise ValueError("Dynamic covariate names must not overlap static predictors or reserved columns.")
+        # Repeated IDs are expected here, but missing/blank labels are invalid.
+        sample_index(pd.unique(dyn["sample_id"]), source="Dynamic covariates")
         dyn["sample_id"] = dyn["sample_id"].astype(str)
-        merged = pd.merge(merged, dyn, on=["sample_id", "time"], how="left")
+        dyn["time"] = pd.to_numeric(dyn["time"], errors="raise")
+        if not np.isfinite(dyn["time"]).all() or (dyn["time"] < 0).any():
+            raise ValueError("Dynamic change times must be finite and nonnegative.")
+        if dyn.duplicated(["sample_id", "time"]).any():
+            raise ValueError("Duplicate dynamic sample_id/time updates are ambiguous.")
+        baseline = dyn.loc[dyn["time"] == 0].set_index("sample_id")
+        complete = baseline[dynamic_cols].notna().all(axis=1)
+        merged = merged[merged["sample_id"].isin(baseline.index[complete])].copy()
+        endpoints = merged.set_index("sample_id")["time"]
+        dyn = dyn[dyn["sample_id"].isin(endpoints.index)].copy()
+        dyn = dyn[dyn["time"] < dyn["sample_id"].map(endpoints)]
+        intervals = to_long_format(merged, duration_col="time")
+        if not merged.empty:
+            for col in dynamic_cols:
+                updates = dyn[["sample_id", "time", col]].dropna(subset=[col])
+                intervals = add_covariate_to_timeline(
+                    intervals, updates, id_col="sample_id", duration_col="time", event_col="event")
+        else:
+            for col in dynamic_cols:
+                intervals[col] = pd.Series(dtype=dyn[col].dtype)
+        table = intervals
+        keep_cols = ["sample_id", "start", "stop", "event"]
+    else:
+        table = merged
+        keep_cols = ["sample_id", "time", "event"]
 
-    n_total = int(merged.shape[0])
-    n_dropped_na = int(merged.isna().any(axis=1).sum())
-    merged = merged.dropna(axis=0)
-
-    keep = merged[["sample_id", "time", "event"]]
-    X = merged.drop(columns=["sample_id", "time", "event"])
-
-    # lifelines expects numeric matrix; one-hot encode categoricals
-    X = pd.get_dummies(X, drop_first=True)
-
-    cox_df = pd.concat([keep, X], axis=1)
-
-    n_used = int(cox_df.shape[0])
-    n_event = int(cox_df["event"].astype(int).sum())
-    n_censored = n_used - n_event
-
-    qc = {
-        "N_total": n_total,
-        "N_dropped_na": n_dropped_na,
-        "N_used": n_used,
-        "N_event": n_event,
-        "N_censored": n_censored,
-    }
+    features = pd.get_dummies(table.drop(columns=keep_cols), drop_first=True)
+    cox_df = pd.concat([table[keep_cols], features], axis=1)
+    n_used = len(merged)
+    n_event = int(merged["event"].sum())
+    qc = {"N_total": int(n_total), "N_dropped_na": int(n_total - n_used),
+          "N_used": int(n_used), "N_event": n_event, "N_censored": int(n_used - n_event)}
+    if dynamic_covar is not None:
+        qc["N_intervals"] = int(len(cox_df))
     return cox_df, qc

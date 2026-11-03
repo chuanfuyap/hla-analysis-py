@@ -274,7 +274,7 @@ def survival(
         - sample_id: matches famfile.IID
         - time: duration
         - event: 1 if event occurred, 0 if censored
-        This table can contain multiple rows per sample (long format).
+        Exactly one endpoint row per sample; time must be positive.
     covar:
         Optional static covariates indexed by IID (or CSV path).
         Categorical covariates are one-hot encoded automatically (drop_first=True).
@@ -283,7 +283,10 @@ def survival(
         - sample_id
         - time
         plus covariate columns.
-        These are merged into the survival table on ["sample_id","time"].
+        Each time is a covariate change time; include baseline values at time zero.
+        Values carry forward into start/stop intervals fitted with CoxTimeVaryingFitter.
+        Missing update cells mean no change. Samples missing a baseline dynamic
+        value are excluded. Updates at/after the endpoint are ignored.
     variant_filter:
         Optional callable(ctx)->bool to skip variants.
     verbose, use_progress_bar, print_every:

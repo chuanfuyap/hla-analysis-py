@@ -24,12 +24,11 @@ from functools import partial
 import numpy as np
 import pandas as pd
 
-from lifelines import CoxPHFitter
 
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_covar, build_survival_table
-from ..models.survival import fit_cox_univariate, lrtest_cox
+from ..models.survival import fit_cox_univariate, fit_cox_model, lrtest_cox
 
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -77,34 +76,37 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
 
     row = dict(meta)
     row["VARIANT"] = variant_id
-    #row.update(qc)
+    row.update(qc)
 
     if qc["N_used"] == 0 or len(geno_cols) == 0:
         row.update({"LR_p": np.nan, "p": np.nan, "HR": np.nan,"StdErr":np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
         return row
 
+    # Count each person once, regardless of how many intervals they contribute.
+    frequency_df = cox_df.drop_duplicates("sample_id")
+
     # Frequencies on FINAL modelling rows
     if adapter.KIND == "SNP":
         if len(geno_cols) == 1 and geno_cols[0] in cox_df.columns:
-            row["MAF"] = _maf_from_col(cox_df[geno_cols[0]])
+            row["MAF"] = _maf_from_col(frequency_df[geno_cols[0]])
         else:
-            maf_by = {c: _maf_from_col(cox_df[c]) for c in geno_cols if c in cox_df.columns}
+            maf_by = {c: _maf_from_col(frequency_df[c]) for c in geno_cols if c in cox_df.columns}
             if maf_by:
                 row["MAF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in maf_by.items()])
 
     elif adapter.KIND == "HLA":
         if len(geno_cols) == 1 and geno_cols[0] in cox_df.columns:
-            row["HLA_AF"] = _af_from_col(cox_df[geno_cols[0]])
+            row["HLA_AF"] = _af_from_col(frequency_df[geno_cols[0]])
         else:
             pieces = []
             for c in geno_cols:
                 if c in cox_df.columns:
-                    pieces.append(f"{c}:af={_af_from_col(cox_df[c]):.6g}")
+                    pieces.append(f"{c}:af={_af_from_col(frequency_df[c]):.6g}")
             if pieces:
                 row["HLA_freqs_str"] = ";".join(pieces)
 
     elif adapter.KIND == "AA":
-        af_by = {c: _af_from_col(cox_df[c]) for c in geno_cols if c in cox_df.columns}
+        af_by = {c: _af_from_col(frequency_df[c]) for c in geno_cols if c in cox_df.columns}
         if af_by:
             row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()])
 
@@ -115,13 +117,13 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
         return row
 
     # Multi-column: omnibus LR only
-    abt = cox_df.drop(columns=["sample_id"], errors="ignore").copy()
+    abt = cox_df.copy()
 
-    alt = CoxPHFitter().fit(abt, duration_col="time", event_col="event")
+    alt = fit_cox_model(abt)
     alt_ll = float(alt.log_likelihood_)
 
     null_cols = [c for c in abt.columns if c not in set(geno_cols)]
-    nul = CoxPHFitter().fit(abt[null_cols], duration_col="time", event_col="event")
+    nul = fit_cox_model(abt[null_cols])
     null_ll = float(nul.log_likelihood_)
 
     row["LR_p"] = lrtest_cox(alt_ll, null_ll, dof=len(geno_cols))
