@@ -163,3 +163,17 @@ For questions, feedback, or collaboration enquiries:
 
 ## Citation
 If you use HLA Analysis Py in your research, please cite this repository. If a corresponding publication becomes available, please cite the publication instead.
+
+
+### Parallel execution
+
+Set `n_jobs=1` for sequential execution, or choose `backend="thread"` or
+`backend="process"` with multiple workers. Both backends use the same models;
+rows may arrive in a different order, so compare results by variant or interaction
+identifier. Thread workers share the input data; process workers receive a copy
+of the analysis state once per worker and can therefore use more memory.
+
+Threads support callbacks defined in a notebook, including lambdas. Process
+workers require importable module-level callbacks and picklable inputs. Use
+threads for notebook-local callbacks. When launching process workers from a
+Python script, put the analysis call inside `if __name__ == "__main__":`.

@@ -20,6 +20,7 @@ in preprocess.build_survival_table().
 from __future__ import annotations
 
 import time
+from functools import partial
 import numpy as np
 import pandas as pd
 
@@ -30,7 +31,6 @@ from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_covar, build_survival_table
 from ..models.survival import fit_cox_univariate, lrtest_cox
 
-_SURVIVAL_STATE: dict | None = None
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     df = dataframe.copy()
@@ -45,11 +45,6 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
 
     return df
 
-def _init_survival_worker(state: dict) -> None:
-    global _SURVIVAL_STATE
-    _SURVIVAL_STATE = state
-
-
 def _af_from_col(s: pd.Series) -> float:
     """Allele frequency estimate from dosage/copy number."""
     return float(s.mean() / 2.0)
@@ -61,17 +56,14 @@ def _maf_from_col(s: pd.Series) -> float:
     return min(p, 1.0 - p)
 
 
-def _run_survival_one_variant(variant_id: str) -> dict:
-    if _SURVIVAL_STATE is None:
-        raise RuntimeError("Survival worker state has not been initialised.")
-
-    adapter = _SURVIVAL_STATE["adapter"]
-    hladat = _SURVIVAL_STATE["hladat"]
-    iid_index = _SURVIVAL_STATE["iid_index"]
-    covdf = _SURVIVAL_STATE["covdf"]
-    event_time = _SURVIVAL_STATE["event_time"]
-    dynamic_covar = _SURVIVAL_STATE["dynamic_covar"]
-    variant_filter = _SURVIVAL_STATE["variant_filter"]
+def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
+    adapter = state["adapter"]
+    hladat = state["hladat"]
+    iid_index = state["iid_index"]
+    covdf = state["covdf"]
+    event_time = state["event_time"]
+    dynamic_covar = state["dynamic_covar"]
+    variant_filter = state["variant_filter"]
 
     geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=iid_index)
     geno_cols = list(geno_df.columns)
@@ -189,13 +181,12 @@ def run_survival(
         "variant_filter": variant_filter,
     }
 
-    _init_survival_worker(state)
 
     prog = ProgressPrinter(total=len(variant_ids), desc=f"survival[{kind}]", use_tqdm=use_progress_bar, print_every=print_every) if verbose else None
 
     rows: list[dict] = []
     for r in parallel_imap_batched(
-        _run_survival_one_variant,
+        partial(_run_survival_one_variant, state=state),
         variant_ids,
         config.n_jobs,
         config.backend,

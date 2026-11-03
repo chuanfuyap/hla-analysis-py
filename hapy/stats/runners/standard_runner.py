@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import re
 import time
+from functools import partial
 from collections.abc import Sequence
 
 import numpy as np
@@ -28,7 +29,6 @@ from ..preprocess import prepare_y, prepare_covar, make_model_table
 from ..models.standard import fit_univariate, fit_omnibus
 
 
-_STANDARD_STATE: dict | None = None
 
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -41,11 +41,6 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns=["N_dropped_other"])
     df = df.dropna(axis=1, how="all")
     return df
-
-
-def _init_standard_worker(state: dict) -> None:
-    global _STANDARD_STATE
-    _STANDARD_STATE = state
 
 
 def _af_from_col(s: pd.Series) -> float:
@@ -100,19 +95,16 @@ def _validate_conditioning_variants(adapter, hladat, condition_on_list: list[str
         )
 
 
-def _run_standard_one_variant(variant_id: str) -> dict:
+def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
     try:
-        if _STANDARD_STATE is None:
-            raise RuntimeError("Standard worker state has not been initialised.")
-
-        adapter = _STANDARD_STATE["adapter"]
-        hladat = _STANDARD_STATE["hladat"]
-        yser = _STANDARD_STATE["yser"]
-        covdf = _STANDARD_STATE["covdf"]
-        covar_cols = _STANDARD_STATE["covar_cols"]
-        model_type = _STANDARD_STATE["model_type"]
-        variant_filter = _STANDARD_STATE["variant_filter"]
-        condition_on_list = _STANDARD_STATE["condition_on_list"]
+        adapter = state["adapter"]
+        hladat = state["hladat"]
+        yser = state["yser"]
+        covdf = state["covdf"]
+        covar_cols = state["covar_cols"]
+        model_type = state["model_type"]
+        variant_filter = state["variant_filter"]
+        condition_on_list = state["condition_on_list"]
 
         # Main tested genotype
         geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
@@ -213,7 +205,7 @@ def _run_standard_one_variant(variant_id: str) -> dict:
         logger.exception(
             "standard runner FAILED on variant_id=%r (kind=%s)",
             variant_id,
-            _STANDARD_STATE["adapter"].KIND if _STANDARD_STATE else "UNKNOWN",
+            state["adapter"].KIND if state else "UNKNOWN",
         )
         raise
 
@@ -293,7 +285,6 @@ def run_standard(
         "condition_on_list": condition_on_list,
     }
 
-    _init_standard_worker(state)
 
     prog = (
         ProgressPrinter(
@@ -308,7 +299,7 @@ def run_standard(
 
     rows: list[dict] = []
     for r in parallel_imap_batched(
-        _run_standard_one_variant,
+        partial(_run_standard_one_variant, state=state),
         variant_ids,
         config.n_jobs,
         config.backend,

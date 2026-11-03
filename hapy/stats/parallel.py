@@ -11,13 +11,15 @@ This version supports:
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, wait, FIRST_COMPLETED
-from typing import Callable, Iterable, Iterator, TypeVar, Any
+from typing import Callable, Iterator, TypeVar
+from threading import local
+import pickle
 
 T = TypeVar("T")
 R = TypeVar("R")
 
-# Per-worker globals, populated by the executor initializer
-_WORKER_FN: Callable[[Any], Any] | None = None
+# Each executor thread/process owns its worker function.
+_WORKER = local()
 
 
 def _executor(backend: str):
@@ -32,18 +34,18 @@ def _init_worker(fn: Callable[[T], R]) -> None:
     """
     Initializer called once per worker process/thread.
     """
-    global _WORKER_FN
-    _WORKER_FN = fn
+    _WORKER.fn = fn
 
 
 def _apply_batch(batch: list[T]) -> list[R]:
     """
     Top-level batch worker, safe for process pools.
-    Uses worker-global function initialised via _init_worker().
+    Uses the function installed in this worker by _init_worker().
     """
-    if _WORKER_FN is None:
+    fn = getattr(_WORKER, "fn", None)
+    if fn is None:
         raise RuntimeError("Worker function was not initialised.")
-    return [_WORKER_FN(x) for x in batch]
+    return [fn(x) for x in batch]
 
 
 def _chunked(items: list[T], batch_size: int) -> Iterator[list[T]]:
@@ -96,6 +98,16 @@ def parallel_imap_batched(
         raise ValueError(f"max_in_flight must be >= 1, got {max_in_flight}")
 
     Executor = _executor(backend)
+    if backend == "process":
+        try:
+            pickle.dumps(fn)
+        except Exception as exc:
+            raise ValueError(
+                "Process workers require importable module-level functions and picklable "
+                "analysis inputs/callbacks. Use backend='thread' for notebook-local "
+                "functions or lambdas. On scripts, guard the analysis call with "
+                "if __name__ == '__main__'."
+            ) from exc
     batch_iter = iter(_chunked(items, batch_size))
     in_flight = set()
 

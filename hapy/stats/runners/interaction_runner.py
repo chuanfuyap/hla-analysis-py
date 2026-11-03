@@ -19,6 +19,7 @@ Conditional A-side adjustment:
 from __future__ import annotations
 
 import time
+from functools import partial
 import numpy as np
 import pandas as pd
 
@@ -35,6 +36,8 @@ def _af_safe(series: pd.Series) -> float:
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     df = dataframe
+    if df.empty:
+        return df
     if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
         df = df.drop(columns = ['N_missing_Y'])
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
@@ -82,6 +85,204 @@ def _build_condition_covariates(adapter_a, hladat, variant_ids: list[str], sampl
 
     cond_df = pd.concat(parts, axis=1)
     return cond_df, cond_cols
+
+
+def _run_omnibus_task(task, *, state: dict) -> dict:
+    """
+    Run one omnibus interaction task.
+
+    A task always tests:
+    - one single anchor column
+    - against one multi-column AA block
+
+    Returns one output row as a dict.
+    """
+    a_blocks = state["a_blocks"]
+    b_blocks = state["b_blocks"]
+    yser = state["yser"]
+    covdf_model = state["covdf_model"]
+    baseline_covars_model = state["baseline_covars_model"]
+    a_kind = state["a_kind"]
+    b_kind = state["b_kind"]
+    config = state["config"]
+    tag = task[0]
+
+    if tag == "A_BLOCK":
+        # Task layout:
+        # ("A_BLOCK", a_id, block_cols, b_id, anchor_col)
+        #
+        # Here:
+        # - A is the AA block
+        # - B contributes the anchor column
+        _, a_id, block_cols, b_id, anchor_col = task
+        a_df, a_meta = a_blocks[a_id]
+        b_df, b_meta = b_blocks[b_id]
+
+        # Build genotype design:
+        # - one anchor column from B
+        # - all AA block columns from A
+        geno = pd.concat([b_df[[anchor_col]], a_df[block_cols]], axis=1)
+
+        # Join genotype data with phenotype/covariates and compute QC
+        abt, qc = make_model_table(geno, yser, covdf_model)
+
+        # Start output row with QC metrics
+        row = {}
+        row.update(qc)
+
+        # Add metadata describing this interaction test
+        row.update(
+            {
+                "A_kind": a_kind,
+                "B_kind": b_kind,
+                "AA_block_side": "A",      # AA block came from side A
+                "AA_variant": a_id,        # identifier for AA block variant
+                "Anchor_variant": b_id,    # identifier for anchor variant
+                "Anchor_col": anchor_col,  # actual anchor column tested
+                "AA_AF_by_col_str": np.nan,
+                "B_AF": np.nan,
+                "Anchor_AF": np.nan,
+                # Prefix metadata from the AA block side
+                **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
+                # Prefix metadata from the anchor side
+                **{f"Anchor_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+            }
+        )
+
+        # If no rows remain after merging / NA filtering, return empty stats
+        if abt.shape[0] == 0:
+            row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
+            return row
+        row["Anchor_AF"] = _af_safe(abt[anchor_col])
+        # Compute allele frequency summary for the AA block columns
+        # using only the final analysis table rows
+        # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
+        # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+
+        # Fit omnibus interaction model:
+        # anchor_col x all block_cols jointly
+        row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
+        return row
+
+    # B_BLOCK case
+    #
+    # Task layout:
+    # ("B_BLOCK", a_id, anchor_col, b_id, block_cols)
+    #
+    # Here:
+    # - B is the AA block
+    # - A contributes the anchor column
+    _, a_id, anchor_col, b_id, block_cols = task
+    a_df, a_meta = a_blocks[a_id]
+    b_df, b_meta = b_blocks[b_id]
+
+    # Build genotype design:
+    # - one anchor column from A
+    # - all AA block columns from B
+    geno = pd.concat([a_df[[anchor_col]], b_df[block_cols]], axis=1)
+
+    # Join genotype data with phenotype/covariates and compute QC
+    abt, qc = make_model_table(geno, yser, covdf_model)
+
+    # Start output row with QC metrics
+    row = {}
+    row.update(qc)
+
+    # Add metadata describing this interaction test
+    row.update(
+        {
+            "A_kind": a_kind,
+            "B_kind": b_kind,
+            "AA_block_side": "B",      # AA block came from side B
+            "AA_variant": b_id,        # identifier for AA block variant
+            "Anchor_variant": a_id,    # identifier for anchor variant
+            "Anchor_col": anchor_col,  # actual anchor column tested
+            "AA_AF_by_col_str": np.nan,
+            "A_AF": np.nan,
+            "Anchor_AF": np.nan,
+            # Prefix metadata from anchor side
+            **{f"Anchor_{k}": v for k, v in a_meta.items() if k != "AAcount"},
+            # Prefix metadata from AA block side
+            **{f"AA_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+        }
+    )
+
+
+
+    # If analysis table is empty, return row with NA stats
+    if abt.shape[0] == 0:
+        row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
+        return row
+    row["Anchor_AF"] = _af_safe(abt[anchor_col])
+
+    # Compute AF summary for the AA block columns on final modelling rows
+    # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
+    # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
+
+    # Fit omnibus interaction model:
+    # anchor_col x all block_cols jointly
+    row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
+    return row
+
+
+def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
+    a_blocks = state["a_blocks"]
+    b_blocks = state["b_blocks"]
+    yser = state["yser"]
+    covdf_model = state["covdf_model"]
+    baseline_covars_model = state["baseline_covars_model"]
+    a_kind = state["a_kind"]
+    b_kind = state["b_kind"]
+    config = state["config"]
+    a_id, ac, b_id, bc = task
+    a_df, a_meta = a_blocks[a_id]
+    b_df, b_meta = b_blocks[b_id]
+
+    geno = pd.concat([a_df[[ac]], b_df[[bc]]], axis=1)
+    abt, qc = make_model_table(geno, yser, covdf_model)
+
+    row: dict = {}
+    row.update(qc)
+    row.update(
+        {
+            "A_kind": a_kind,
+            "B_kind": b_kind,
+            "A_variant": a_id,
+            "A_col": ac,
+            "B_variant": b_id,
+            "B_col": bc,
+            "A_AF": np.nan,
+            "B_AF": np.nan,
+            **{f"A_{k}": v for k, v in a_meta.items() if k != "AAcount"},
+            **{f"B_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+        }
+    )
+
+    if abt.shape[0] == 0:
+        row.update(
+            {
+                "A_p": np.nan,
+                "A_coef": np.nan,
+                "A_StdErr": np.nan,
+                "B_p": np.nan,
+                "B_coef": np.nan,
+                "B_StdErr": np.nan,
+                "I_p": np.nan,
+                "I_coef": np.nan,
+                "I_StdErr": np.nan,
+                "I_CI_0.025": np.nan,
+                "I_CI_0.975": np.nan,
+                "LR_p": np.nan,
+                "Anova_p": np.nan,
+            }
+        )
+        return row
+
+    row["A_AF"] = _af_safe(abt[ac])
+    row["B_AF"] = _af_safe(abt[bc])
+
+    row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
+    return row
 
 
 def run_interaction(
@@ -207,6 +408,17 @@ def run_interaction(
         covdf_model = covdf
         baseline_covars_model = list(baseline_covars)
 
+    worker_state = {
+        "a_blocks": a_blocks,
+        "b_blocks": b_blocks,
+        "yser": yser,
+        "covdf_model": covdf_model,
+        "baseline_covars_model": baseline_covars_model,
+        "a_kind": a_kind,
+        "b_kind": b_kind,
+        "config": config,
+    }
+
     # ==============
     # Pairwise mode
     # ==============
@@ -236,56 +448,6 @@ def run_interaction(
         if verbose:
             print(f"pairs available to analyse (scheduled tasks): {len(tasks)}", flush=True)
 
-        def work(task: tuple[str, str, str, str]) -> dict:
-            a_id, ac, b_id, bc = task
-            a_df, a_meta = a_blocks[a_id]
-            b_df, b_meta = b_blocks[b_id]
-
-            geno = pd.concat([a_df[[ac]], b_df[[bc]]], axis=1)
-            abt, qc = make_model_table(geno, yser, covdf_model)
-
-            row: dict = {}
-            row.update(qc)
-            row.update(
-                {
-                    "A_kind": a_kind,
-                    "B_kind": b_kind,
-                    "A_variant": a_id,
-                    "A_col": ac,
-                    "B_variant": b_id,
-                    "B_col": bc,
-                    "A_AF": np.nan,
-                    "B_AF": np.nan,
-                    **{f"A_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-                    **{f"B_{k}": v for k, v in b_meta.items() if k != "AAcount"},
-                }
-            )
-
-            if abt.shape[0] == 0:
-                row.update(
-                    {
-                        "A_p": np.nan,
-                        "A_coef": np.nan,
-                        "A_StdErr": np.nan, 
-                        "B_p": np.nan,
-                        "B_coef": np.nan,
-                        "B_StdErr": np.nan, 
-                        "I_p": np.nan,
-                        "I_coef": np.nan,
-                        "I_StdErr": np.nan, 
-                        "I_CI_0.025": np.nan,
-                        "I_CI_0.975": np.nan,
-                        "LR_p": np.nan,
-                        "Anova_p": np.nan,
-                    }
-                )
-                return row
-
-            row["A_AF"] = _af_safe(abt[ac])
-            row["B_AF"] = _af_safe(abt[bc])
-
-            row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
-            return row
 
         prog = ProgressPrinter(
             total=len(tasks),
@@ -296,7 +458,7 @@ def run_interaction(
 
         rows: list[dict] = []
         for r in parallel_imap_batched(
-            work,
+            partial(_run_pairwise_task, state=worker_state),
             tasks,
             config.n_jobs,
             config.backend,
@@ -442,134 +604,6 @@ def run_interaction(
         print(f"omnibus tasks available to analyse (scheduled): {len(tasks_omni)}", flush=True)
 
 
-    def work_omni(task) -> dict:
-        """
-        Run one omnibus interaction task.
-
-        A task always tests:
-        - one single anchor column
-        - against one multi-column AA block
-
-        Returns one output row as a dict.
-        """
-        tag = task[0]
-
-        if tag == "A_BLOCK":
-            # Task layout:
-            # ("A_BLOCK", a_id, block_cols, b_id, anchor_col)
-            #
-            # Here:
-            # - A is the AA block
-            # - B contributes the anchor column
-            _, a_id, block_cols, b_id, anchor_col = task
-            a_df, a_meta = a_blocks[a_id]
-            b_df, b_meta = b_blocks[b_id]
-
-            # Build genotype design:
-            # - one anchor column from B
-            # - all AA block columns from A
-            geno = pd.concat([b_df[[anchor_col]], a_df[block_cols]], axis=1)
-
-            # Join genotype data with phenotype/covariates and compute QC
-            abt, qc = make_model_table(geno, yser, covdf_model)
-
-            # Start output row with QC metrics
-            row = {}
-            row.update(qc)
-
-            # Add metadata describing this interaction test
-            row.update(
-                {
-                    "A_kind": a_kind,
-                    "B_kind": b_kind,
-                    "AA_block_side": "A",      # AA block came from side A
-                    "AA_variant": a_id,        # identifier for AA block variant
-                    "Anchor_variant": b_id,    # identifier for anchor variant
-                    "Anchor_col": anchor_col,  # actual anchor column tested
-                    "AA_AF_by_col_str": np.nan,
-                    "B_AF": np.nan,
-                    "Anchor_AF": np.nan,
-                    # Prefix metadata from the AA block side
-                    **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-                    # Prefix metadata from the anchor side
-                    **{f"Anchor_{k}": v for k, v in b_meta.items() if k != "AAcount"},
-                }
-            )
-
-            # If no rows remain after merging / NA filtering, return empty stats
-            if abt.shape[0] == 0:
-                row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
-                return row
-            row["Anchor_AF"] = _af_safe(abt[anchor_col])
-            # Compute allele frequency summary for the AA block columns
-            # using only the final analysis table rows
-            # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-            # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
-
-            # Fit omnibus interaction model:
-            # anchor_col x all block_cols jointly
-            row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
-            return row
-
-        # B_BLOCK case
-        #
-        # Task layout:
-        # ("B_BLOCK", a_id, anchor_col, b_id, block_cols)
-        #
-        # Here:
-        # - B is the AA block
-        # - A contributes the anchor column
-        _, a_id, anchor_col, b_id, block_cols = task
-        a_df, a_meta = a_blocks[a_id]
-        b_df, b_meta = b_blocks[b_id]
-
-        # Build genotype design:
-        # - one anchor column from A
-        # - all AA block columns from B
-        geno = pd.concat([a_df[[anchor_col]], b_df[block_cols]], axis=1)
-
-        # Join genotype data with phenotype/covariates and compute QC
-        abt, qc = make_model_table(geno, yser, covdf_model)
-
-        # Start output row with QC metrics
-        row = {}
-        row.update(qc)
-
-        # Add metadata describing this interaction test
-        row.update(
-            {
-                "A_kind": a_kind,
-                "B_kind": b_kind,
-                "AA_block_side": "B",      # AA block came from side B
-                "AA_variant": b_id,        # identifier for AA block variant
-                "Anchor_variant": a_id,    # identifier for anchor variant
-                "Anchor_col": anchor_col,  # actual anchor column tested
-                "AA_AF_by_col_str": np.nan,
-                "A_AF": np.nan,
-                "Anchor_AF": np.nan,
-                # Prefix metadata from anchor side
-                **{f"Anchor_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-                # Prefix metadata from AA block side
-                **{f"AA_{k}": v for k, v in b_meta.items() if k != "AAcount"},
-            }
-        )
-
-
-
-        # If analysis table is empty, return row with NA stats
-        if abt.shape[0] == 0:
-            row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
-            return row
-        row["Anchor_AF"] = _af_safe(abt[anchor_col])
-
-        # Compute AF summary for the AA block columns on final modelling rows
-        # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-        # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
-
-        # Fit omnibus interaction model:
-        # anchor_col x all block_cols jointly
-        row.update(fit_block_omnibus_interaction(abt, anchor_col, block_cols, baseline_covars_model, config.model_type))
-        return row
 
 
     # Optional progress printer for omnibus interaction jobs
@@ -584,7 +618,7 @@ def run_interaction(
 
     # Run all omnibus tasks in parallel, batched for lower scheduling overhead
     for r in parallel_imap_batched(
-        work_omni,
+        partial(_run_omnibus_task, state=worker_state),
         tasks_omni,
         config.n_jobs,
         config.backend,
@@ -609,7 +643,7 @@ def run_interaction(
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")
-    
+
     if "LR_p" in out.columns:
         out = out.sort_values("LR_p")
 
