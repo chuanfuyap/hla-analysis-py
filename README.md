@@ -131,7 +131,7 @@ print(results.head())
 ### Meta-analysis
 
 ```python
-inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA",pval="LR_p", variant_col="VARIANT", prefix="META")
+inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA", pval="LR_p", variant_col="VARIANT", prefix="META")
 # `example_studies.txt` refers to a txt file listing path to all the results that will be meta-analysed, this return two separate results where 
 ```
 

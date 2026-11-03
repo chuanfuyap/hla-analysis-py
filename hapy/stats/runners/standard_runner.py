@@ -39,10 +39,6 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns=["N_COND_VARIANTS"])
     if "N_dropped_other" in df.columns and df.N_dropped_other.nunique() == 1 and df.N_dropped_other.unique()[0] == 0:
         df = df.drop(columns=["N_dropped_other"])
-    if "N_used" in df.columns and "N_total" in df.columns:
-        if df.N_used.nunique() == 1 and df.N_total.nunique() == 1:
-            if df.N_used.unique()[0] == df.N_total.unique()[0]:
-                df = df.drop(columns=["N_used"])
     df = df.dropna(axis=1, how="all")
     return df
 

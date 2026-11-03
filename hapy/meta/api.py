@@ -22,11 +22,11 @@ def meta_analyse(fileloc, data_type, beta="Uni_Coef", se="Uni_StdErr",
     data_type : str
         One of "AA", "HLA", "SNP".
     beta : str
-        the effect size column
+        the effect size column (this is only needed for Inverse Variance Weighting method)
     se : str
-        the standard error column
+        the standard error column (this is only needed for Inverse Variance Weighting method)
     pval : str
-         pvalue columns, default = "LR_p"
+         pvalue columns, default = "LR_p" (this is only needed for Stouffer's method)
     variant_col : str
         variant ID column
     prefix : str

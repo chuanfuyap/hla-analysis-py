@@ -24,7 +24,7 @@ import pandas as pd
 
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
-from ..preprocess import prepare_y, prepare_covar, make_model_table
+from ..preprocess import prepare_y, prepare_covar, make_model_table, sample_index
 from ..models.interaction import fit_pairwise_interaction, fit_block_omnibus_interaction
 
 
@@ -39,8 +39,6 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns = ['N_missing_Y'])
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
         df = df.drop(columns = ['N_dropped_other'])
-    if df.N_used.unique()[0]==df.N_total.unique()[0]:
-        df = df.drop(columns = ['N_used'])
 
     df = df.dropna(axis=1, how="all")
 
@@ -121,8 +119,7 @@ def run_interaction(
             raise TypeError("block_b_df must be a pandas DataFrame.")
         # align by IID index; keep only modelling rows later via make_model_table
         block_b_df = block_b_df.copy()
-        if block_b_df.index.dtype != object:
-            block_b_df.index = block_b_df.index.astype(str)
+        block_b_df.index = sample_index(block_b_df.index, source="Interaction block B")
         block_b_df = block_b_df.reindex(yser.index)
 
     # ----------------------------

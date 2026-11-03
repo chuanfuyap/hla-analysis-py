@@ -12,8 +12,23 @@ Survival analyses:
 """
 
 from __future__ import annotations
+from os import PathLike
+
 import numpy as np
 import pandas as pd
+
+
+def sample_index(values, *, source: str = "Samples") -> pd.Index:
+    """Canonical IID labels; ambiguous or missing sample identifiers are errors."""
+    ix = pd.Index(values)
+    if ix.isna().any():
+        raise ValueError(f"{source} contains missing sample IDs.")
+    ix = ix.astype(str)
+    if (ix.str.strip() == "").any():
+        raise ValueError(f"{source} contains empty sample IDs.")
+    if ix.has_duplicates:
+        raise ValueError(f"{source} contains duplicate sample IDs after conversion to strings.")
+    return ix.rename("IID")
 
 
 def fam_index(famfile: pd.DataFrame) -> pd.Index:
@@ -30,7 +45,7 @@ def fam_index(famfile: pd.DataFrame) -> pd.Index:
     pd.Index
         IID values as strings.
     """
-    return pd.Index(famfile["IID"].astype(str), name="IID")
+    return sample_index(famfile["IID"], source="famfile")
 
 
 def _maybe_recode_binary_12_to_01(ys: pd.Series) -> pd.Series:
@@ -77,8 +92,10 @@ def prepare_y(famfile: pd.DataFrame, y=None) -> pd.Series:
     """
     if famfile is not None:
         ix = fam_index(famfile)
-    else: 
-        ix = y.index
+    elif isinstance(y, pd.Series):
+        ix = sample_index(y.index, source="Phenotype")
+    else:
+        raise ValueError("Without famfile, y must be a pandas Series indexed by IID.")
 
     if y is None:
         fam = famfile[["IID", "PHENO"]].copy()
@@ -91,13 +108,15 @@ def prepare_y(famfile: pd.DataFrame, y=None) -> pd.Series:
 
     if isinstance(y, pd.Series):
         ys = y.copy()
-        ys.index = ys.index.astype(str)
+        ys.index = sample_index(ys.index, source="Phenotype")
         ys = ys.reindex(ix)
         ys = _maybe_recode_binary_12_to_01(ys)
         ys.name = "Y"
         return ys
 
     arr = np.asarray(y)
+    if arr.ndim != 1:
+        raise ValueError("Provided y must be one-dimensional.")
     if arr.shape[0] != len(ix):
         raise ValueError(f"Provided y has length {arr.shape[0]} but famfile has {len(ix)} IIDs.")
     ys = pd.Series(arr, index=ix, name="Y")
@@ -132,12 +151,14 @@ def prepare_covar(covar, index: pd.Index) -> pd.DataFrame | None:
     if covar is None:
         return None
 
-    if isinstance(covar, str):
-        cov = pd.read_csv(covar, index_col=0)
+    index = sample_index(index, source="Target samples")
+    if isinstance(covar, (str, PathLike)):
+        # Read the ID column as text before pandas can discard leading zeros.
+        cov = pd.read_csv(covar, index_col=0, converters={0: str})
     else:
         cov = covar.copy()
 
-    cov.index = cov.index.astype(str)
+    cov.index = sample_index(cov.index, source="Covariates")
     return cov.reindex(index)
 
 
@@ -217,8 +238,15 @@ def make_model_table(geno_df: pd.DataFrame, y: pd.Series, cov: pd.DataFrame | No
           - N_used: final rows used
           - N_case/N_control: if binary on final rows
     """
+    geno_df = geno_df.copy()
+    geno_df.index = sample_index(geno_df.index, source="Genotypes")
+    y = y.copy()
+    y.index = sample_index(y.index, source="Phenotype")
+    y.name = "Y"
     parts = [geno_df, y.to_frame()]
     if cov is not None:
+        cov = cov.copy()
+        cov.index = sample_index(cov.index, source="Covariates")
         parts.insert(1, cov)
 
     abt = pd.concat(parts, axis=1)

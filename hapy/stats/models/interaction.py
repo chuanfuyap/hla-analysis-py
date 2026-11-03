@@ -156,14 +156,14 @@ def fit_pairwise_interaction(
     out = {
         "A_p":  float(alt.pvalues[a_t]),
         "A_coef": float(alt.params[a_t]),
-        "A_StdErr": round(float(alt.bse[a_t]), 3),
+        "A_StdErr": float(alt.bse[a_t]), 
         "B_p": float(alt.pvalues[b_t]),
         "B_coef":float(alt.params[b_t]),
-        "B_StdErr": round(float(alt.bse[b_t]), 3),
+        "B_StdErr": float(alt.bse[b_t]),
         "I_term": iterm,
         "I_p": float(alt.pvalues[iterm]),
         "I_coef": float(alt.params[iterm]),
-        "I_StdErr" : round(float(alt.bse[iterm]), 3),
+        "I_StdErr" : float(alt.bse[iterm]),
         "I_CI_0.025": float(ci[0]),
         "I_CI_0.975": float(ci[1]),
     }
