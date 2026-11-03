@@ -39,230 +39,143 @@ def _inverse_variance_meta_analysis(betas, ses):
     return meta_beta, meta_se, p_value, log_p, z_score*z_score
 
 
-def inv_var_meta_studies(studies: List[pd.DataFrame], beta: str, se: str, variant_col: str, prefix: str) -> pd.DataFrame:
+# One input table represents one independent cohort. Sample counts are optional
+# metadata; when present they must be finite and nonnegative (missing is allowed).
+_SAMPLE_TOTALS = {"N_total": "Total N", "N_case": "Total Case", "N_control": "Total Control"}
+_SAMPLE_COLUMNS = ("N_used", "N", "N_total", "N_case", "N_control")
+
+
+def _prepare_studies(studies, required, variant_col):
+    frames = []
+    for index, study in enumerate(studies):
+        if not isinstance(study, pd.DataFrame):
+            raise TypeError(f"Study {index + 1} must be a pandas DataFrame.")
+        for column in required:
+            if column not in study:
+                raise ValueError(f"Column '{column}' not found in study {index + 1}.")
+        frame = study.dropna(subset=[variant_col]).copy()
+        if frame[variant_col].duplicated().any():
+            raise ValueError(f"Study {index + 1} contains duplicate variant IDs.")
+        for column in _SAMPLE_COLUMNS:
+            if column in frame:
+                frame[column] = pd.to_numeric(frame[column], errors="raise")
+                values = frame[column].dropna().to_numpy(dtype=float)
+                if np.any(~np.isfinite(values)) or np.any(values < 0):
+                    raise ValueError(f"Study {index + 1}: {column} must be finite and nonnegative.")
+        frames.append(frame)
+    return (pd.concat(frames, ignore_index=True) if frames
+            else pd.DataFrame(columns=required))
+
+
+def _total_columns(combined):
+    return {source: target for source, target in _SAMPLE_TOTALS.items() if source in combined}
+
+
+def _sample_totals(group, columns):
+    # Do not report a partial sum as a complete total when a cohort lacks counts.
+    return {target: group[source].sum(min_count=len(group))
+            for source, target in columns.items()}
+
+
+def inv_var_meta_studies(studies: List[pd.DataFrame], beta: str, se: str,
+                         variant_col: str, prefix: str) -> pd.DataFrame:
+    """Fixed-effect inverse-variance meta-analysis of aligned cohort effects.
+
+    Each input table represents an independent cohort and must contain at most
+    one row per variant. Results require at least two contributing cohorts.
+    Sample totals are calculated per variant; the coefficient test is two-sided.
     """
-    Computes inverse-variance weighted meta-analysis for all available variants in the input dataframes.
-
-    Parameters:
-        studies: list of sumstats in dataframes
-        beta: column name for effect size
-        se: column name for standard error
-        variant_col: column name for variants
-        prefix: prefix for output column names
-
-    Returns:
-        DataFrame with meta-analysis results.
-    """
-    # Concatenate all studies into one DataFrame
-    combined = pd.concat(studies, ignore_index=True)
-    has_binary_cols = ("N_case" in combined.columns) and ("N_control" in combined.columns)
-    
-    # Validate required columns
-    required_cols = [variant_col, beta, se]
-    for col in required_cols:
-        if col not in combined.columns:
-            raise ValueError(f"Column '{col}' not found in the input dataframes.")
-    
-    # Group by variant
-    grouped = combined.groupby(variant_col) 
-    total_n = combined["N_total"].unique().sum()
-    total_case, total_control = None, None
-    if has_binary_cols:
-        total_case = combined["N_case"].unique().sum()
-        total_control = combined["N_control"].unique().sum()
-
-    # We'll filter groups to only those with more than one study
-    # Then apply meta-analysis to those groups
-    def meta_func(df):
-        if len(df) < 2:
-            return pd.Series({
-                "N studies": np.nan,
-                f"{prefix}_BETA": np.nan,
-                f"{prefix}_SE": np.nan,
-                f"{prefix}_chisquared": np.nan, 
-                f"{prefix}_P": np.nan,
-                f"{prefix}_log10P": np.nan
-            })
-        
-        betas = df[beta].values
-        ses = df[se].values
-
+    combined = _prepare_studies(studies, [variant_col, beta, se], variant_col)
+    totals = _total_columns(combined)
+    columns = [variant_col, "N studies", f"{prefix}_BETA", f"{prefix}_SE",
+               f"{prefix}_chisquared", f"{prefix}_P", f"{prefix}_log10P", *totals.values()]
+    rows = []
+    for variant, group in combined.groupby(variant_col, sort=False):
+        if len(group) < 2:
+            continue
+        betas = pd.to_numeric(group[beta], errors="raise").to_numpy(dtype=float)
+        ses = pd.to_numeric(group[se], errors="raise").to_numpy(dtype=float)
         meta_beta, meta_se, p_value, log_p, chisquared = _inverse_variance_meta_analysis(betas, ses)
-        return pd.Series({
-            "N studies": len(betas),
-            f"{prefix}_BETA": meta_beta,
-            f"{prefix}_SE": meta_se,
-            f"{prefix}_chisquared": chisquared,
-            f"{prefix}_P": p_value,
-            f"{prefix}_log10P": -log_p
+        rows.append({
+            variant_col: variant, "N studies": len(group),
+            f"{prefix}_BETA": meta_beta, f"{prefix}_SE": meta_se,
+            f"{prefix}_chisquared": chisquared, f"{prefix}_P": p_value,
+            f"{prefix}_log10P": -log_p, **_sample_totals(group, totals),
         })
-    
-    # Apply the meta_func to each group
-    results = grouped.apply(meta_func).reset_index()
-    results["Total N"] = total_n
-    if has_binary_cols:
-        results['Total Case'] = total_case
-        results["Total Control"] = total_control
-    results = results.dropna(subset=["N studies"])
-
-    # Drop rows that do not have at least two studies
-    results = results.dropna(subset=["N studies"])
-
-    return results
+    return pd.DataFrame(rows, columns=columns)
 
 
-def stouffers_meta_studies(
-    studies: List[pd.DataFrame],
-    pval: str,
-    variant_col: str,
-    prefix: str,
-) -> pd.DataFrame:
+def _stouffer_weights(combined):
+    weights = pd.Series(1.0, index=combined.index)
+    binary = pd.Series(False, index=combined.index)
+    if "N_case" in combined and "N_control" in combined:
+        cases, controls = combined["N_case"], combined["N_control"]
+        binary = cases.gt(0) & controls.gt(0)
+        effective_n = 4.0 / (1.0 / cases.loc[binary] + 1.0 / controls.loc[binary])
+        weights.loc[binary] = np.sqrt(effective_n)
+
+    # Prefer the actual modelling sample size. N_total also supports HAPY
+    # outputs where N_used was omitted because all samples were used.
+    sample_n = pd.Series(np.nan, index=combined.index)
+    for column in ("N_used", "N", "N_total"):
+        if column in combined:
+            available = sample_n.isna() & combined[column].gt(0)
+            sample_n.loc[available] = combined.loc[available, column]
+    quantitative = ~binary & sample_n.notna()
+    weights.loc[quantitative] = np.sqrt(sample_n.loc[quantitative])
+    if not np.isfinite(weights.to_numpy()).all():
+        raise ValueError("Sample sizes produce non-finite Stouffer weights.")
+    return weights
+
+
+def stouffers_meta_studies(studies: List[pd.DataFrame], pval: str,
+                           variant_col: str, prefix: str) -> pd.DataFrame:
+    """Combine independent-cohort omnibus p-values with weighted Stouffer.
+
+    The evidence transform is z_i = norm.isf(p_i), followed by
+    Z = sum(w_i*z_i) / sqrt(sum(w_i**2)) and P = norm.sf(Z). This does not
+    impose an effect direction on the cohort tests. Weights are sqrt(N_eff)
+    for valid case/control counts, otherwise sqrt(N_used), sqrt(N), or
+    sqrt(N_total), in that order. Rows with no usable counts use weight 1.
+    Weights must be chosen independently of the observed p-values.
+
+    Each input table represents one independent cohort with at most one row per
+    variant. Missing variant IDs or p-values are omitted; invalid p-values raise
+    an error. Inputs require 0 < p <= 1 and are not clipped. An exact p=1 maps
+    to -infinity, giving combined P=1, consistent with the Stouffer limit.
+    At least two contributing cohorts are required for each reported variant.
+
+    Output: N studies, <prefix>_Z, <prefix>_P and <prefix>_log10P (-log10 P),
+    plus available per-variant cohort totals. Incomplete sample totals are NaN.
+    Input tables are not modified.
     """
-    Combine per-study p-values across studies using weighted Stouffer's method.
-
-    Weighting rule
-    --------------
-    For each row:
-    - if both N_case and N_control are present and non-missing, use sqrt(N_eff),
-      where N_eff = 4 / (1/N_case + 1/N_control)
-    - else if N is present and non-missing, use sqrt(N)
-    - else use equal weight = 1
-
-    This version is appropriate for non-directional p-values, such as omnibus
-    LR-test or ANOVA p-values.
-
-    Parameters
-    ----------
-    studies : list[pd.DataFrame]
-        List of per-study result tables.
-    pval : str
-        Name of the column containing the per-study p-value.
-    variant_col : str
-        Name of the column identifying the tested variant / marker / block.
-    prefix : str
-        Prefix used for output column names.
-
-    Returns
-    -------
-    pd.DataFrame
-        One row per variant, containing:
-        - number of studies combined
-        - meta-analytic Z-statistic
-        - meta-analytic p-value
-        - -log10(p)
-    """
-
-    # Stack all studies into one table
-    combined = pd.concat(studies, ignore_index=True)
-
-    # Check essential columns
-    required_cols = [variant_col, pval]
-    for col in required_cols:
-        if col not in combined.columns:
-            raise ValueError(f"Column '{col}' not found in the input dataframes.")
-
-    # Work on a copy so we do not modify the original input tables
-    combined = combined.copy()
-
-    # Convert p-values to numeric and drop missing rows
-    combined[pval] = pd.to_numeric(combined[pval], errors="coerce")
-    combined = combined.dropna(subset=[variant_col, pval])
-
-    # Validate p-values
-    if np.any(~np.isfinite(combined[pval])):
+    combined = _prepare_studies(studies, [variant_col, pval], variant_col)
+    totals = _total_columns(combined)
+    columns = [variant_col, "N studies", f"{prefix}_Z", f"{prefix}_P",
+               f"{prefix}_log10P", *totals.values()]
+    combined[pval] = pd.to_numeric(combined[pval], errors="raise")
+    combined = combined.dropna(subset=[pval]).copy()
+    pvalues = combined[pval].to_numpy(dtype=float)
+    if np.any(~np.isfinite(pvalues)):
         raise ValueError("All p-values must be finite.")
-    if np.any((combined[pval] <= 0) | (combined[pval] > 1)):
+    if np.any((pvalues <= 0) | (pvalues > 1)):
         raise ValueError("All p-values must be in the interval (0, 1].")
-
-    # Convert omnibus p-values to unsigned Z-scores
-    # We use a two-sided mapping because omnibus tests are non-directional
-    eps = 1e-300
-    pvals = combined[pval].clip(lower=eps).astype(float)
-    combined["_z"] = stats.norm.isf(pvals / 2.0)
-
-    # Initialise equal weights
-    combined["_w"] = 1.0
-
-    # Detect whether sample-size columns exist
-    has_binary_cols = ("N_case" in combined.columns) and ("N_control" in combined.columns)
-    has_quant_col = "N" in combined.columns
-
-    # Convert sample-size columns to numeric if present
-    if has_binary_cols:
-        combined["N_case"] = pd.to_numeric(combined["N_case"], errors="coerce")
-        combined["N_control"] = pd.to_numeric(combined["N_control"], errors="coerce")
-
-    if has_quant_col:
-        combined["N"] = pd.to_numeric(combined["N"], errors="coerce")
-
-    # Binary trait weighting takes priority when both columns are available
-    if has_binary_cols:
-        valid_binary = (
-            combined["N_case"].notna()
-            & combined["N_control"].notna()
-            & (combined["N_case"] > 0)
-            & (combined["N_control"] > 0)
-        )
-
-        # Effective sample size for case-control data
-        combined.loc[valid_binary, "_N_eff"] = 4.0 / (
-            (1.0 / combined.loc[valid_binary, "N_case"])
-            + (1.0 / combined.loc[valid_binary, "N_control"])
-        )
-        combined.loc[valid_binary, "_w"] = np.sqrt(combined.loc[valid_binary, "_N_eff"])
-
-    # For rows without valid binary sample sizes, try quantitative N
-    if has_quant_col:
-        valid_quant = (
-            combined["N"].notna()
-            & (combined["N"] > 0)
-            & (combined["_w"] == 1.0)
-        )
-        combined.loc[valid_quant, "_w"] = np.sqrt(combined.loc[valid_quant, "N"])
-
-    # Group by tested unit
-    grouped = combined.groupby(variant_col, sort=False)
-
-    total_n = combined["N_total"].unique().sum()
-    total_case, total_control = None, None
-    if has_binary_cols:
-        total_case = combined["N_case"].unique().sum()
-        total_control = combined["N_control"].unique().sum()
-    
-    def stouffer_func(df: pd.DataFrame) -> pd.Series:
-        """
-        Combine p-values for one variant / block across studies.
-        """
-        z_i = df["_z"].to_numpy(dtype=float)
-        w_i = df["_w"].to_numpy(dtype=float)
-        k = len(z_i)
-
-        # Require at least two studies
-        if k < 2:
-            return pd.Series({
-                "N studies": np.nan,
-                f"{prefix}_Z": np.nan,
-                f"{prefix}_P": np.nan,
-                f"{prefix}_log10P": np.nan,
-            })
-
-        # Weighted Stouffer combination
-        z_meta = np.sum(w_i * z_i) / np.sqrt(np.sum(w_i ** 2))
-        p_meta = 2.0 * stats.norm.sf(abs(z_meta))
-        log_p =  (stats.norm.logsf(abs(z_meta)) + np.log(2)) / np.log(10)
-
-        return pd.Series({
-            "N studies": k,
-            f"{prefix}_Z": z_meta,
-            f"{prefix}_P": p_meta,
-            f"{prefix}_log10P": -log_p,
+    combined["_z"] = stats.norm.isf(pvalues)
+    combined["_w"] = _stouffer_weights(combined)
+    rows = []
+    for variant, group in combined.groupby(variant_col, sort=False):
+        if len(group) < 2:
+            continue
+        weights = group["_w"].to_numpy(dtype=float)
+        # Scaling preserves relative weights and avoids squaring huge counts.
+        weights = weights / weights.max()
+        z_meta = float(np.dot(weights, group["_z"].to_numpy(dtype=float))
+                       / np.linalg.norm(weights))
+        p_meta = float(stats.norm.sf(z_meta))
+        log_p = float(stats.norm.logsf(z_meta) / np.log(10.0))
+        rows.append({
+            variant_col: variant, "N studies": len(group),
+            f"{prefix}_Z": z_meta, f"{prefix}_P": p_meta,
+            f"{prefix}_log10P": -log_p, **_sample_totals(group, totals),
         })
-
-    results = grouped.apply(stouffer_func).reset_index()
-    results["Total N"] = total_n
-    if has_binary_cols:
-        results['Total Case'] = total_case
-        results["Total Control"] = total_control
-    results = results.dropna(subset=["N studies"])
-
-    return results
+    return pd.DataFrame(rows, columns=columns)

@@ -6,6 +6,7 @@ Reads a txt file containing all the results files to be meta-analysed, each file
 from __future__ import annotations
 
 from typing import List, Tuple
+from pathlib import Path
 import pandas as pd
 from scipy import stats
 
@@ -25,25 +26,20 @@ def _compute_se_interaction(study: pd.DataFrame) -> pd.DataFrame:
     study["SE"] = (study["I_CI_0.975"] - study["I_CI_0.025"]) / (2 * _Z_CI)
     return study[study["SE"] > 0]
 
-def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Split AA results into IVW (univariate, LR_p null) and
-    Stouffer's (omnibus, LR_p not null) subsets.
-    """
-
+def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame | None, pd.DataFrame]:
+    """Split AA results into univariate IVW and omnibus Stouffer inputs."""
+    study = study.copy()
     if interaction:
-        study["INTERACTION"] = study['AA_VARIANT']+"*" +study['Anchor_col']
-
-    
+        study["INTERACTION"] = study["AA_VARIANT"] + "*" + study["Anchor_col"]
+    lr_p = study.get("LR_p", pd.Series(float("nan"), index=study.index))
+    omnibus = study[lr_p.notnull()].copy()
     if interaction:
-        ivw=None
-    else:
-        ivw = _compute_se(study[study["LR_p"].isnull()])
-    stouffer = study[study["LR_p"].notnull()]
+        return None, omnibus
+    ivw = study[lr_p.isnull()].copy()
+    if not ivw.empty:
+        ivw = _compute_se(ivw)
+    return ivw, omnibus
 
-
-
-    return ivw, stouffer
 
 def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, None]:
     """HLA and SNP results: IVW only, derive SE from CI."""
@@ -70,7 +66,7 @@ def read_input_files(
     Parameters
     ----------
     file_loc : str
-        Path to a text file where each line is a path to a cohort results TSV.
+        Path to a text file where each line is a path to a cohort results CSV.
     data_type : str
         One of "AA", "HLA", "SNP".
 
@@ -89,25 +85,21 @@ def read_input_files(
 
     inv_var_studies, stouffer_studies = [], []
 
-    if interaction:
-        with open(file_loc, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in lines:
-                study = pd.read_csv(line.strip())
-                ivw, stouffer = process(study, interaction=True)
-
+    seen_paths = set()
+    with open(file_loc, "r", encoding="utf-8") as stream:
+        for line in stream:
+            path = line.strip()
+            if not path:
+                continue
+            resolved = Path(path).resolve()
+            if resolved in seen_paths:
+                raise ValueError(f"Duplicate cohort file in input list: {path}")
+            seen_paths.add(resolved)
+            study = pd.read_csv(path)
+            ivw, omnibus = process(study, interaction=interaction)
+            if ivw is not None and not ivw.empty:
                 inv_var_studies.append(ivw)
-                if stouffer is not None and not stouffer.empty:
-                    stouffer_studies.append(stouffer)
-    else:
-        with open(file_loc, 'r', encoding='utf-8') as f:
-            lines = f.readlines()
-            for line in lines:
-                study = pd.read_csv(line.strip())
-                ivw, stouffer = process(study)
-
-                inv_var_studies.append(ivw)
-                if stouffer is not None and not stouffer.empty:
-                    stouffer_studies.append(stouffer)
+            if omnibus is not None and not omnibus.empty:
+                stouffer_studies.append(omnibus)
 
     return inv_var_studies, stouffer_studies

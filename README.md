@@ -47,13 +47,13 @@ pip install .
 
 ### PLINK input
 
-> When using imputed data from Michigan server, you can convert to PLINK with PLINK2 which can be read by hapy. It is preferable to use pgen as it would retain the imputation accuracy as well as fratctional dosage values.
+> When using imputed data from Michigan server, you can convert to PLINK file formats (v1 `bilfe` or v2 `pgen`) with PLINK2 which can be read by `hapy`. It is preferable to use `pgen` format as it would retain the imputation accuracy as well as fratctional dosage values.
 >
-> If .raw file (exported by PLINK with `--export A`) is preferred, try to retain pgen's pvarfile to have imputation accuracy. 
+> If `.raw` file (exported by PLINK with `--export A`) is preferred, try to retain `pgen`'s pvarfile to have imputation accuracy.
 >
-> bfile format is also implemented but should be avoided as it loses fractional dosage value, giving only 0/1/2 counts and imputation accuracy information is not maintained. 
+> `bfile` format is also implemented but should be avoided as it loses fractional dosage value, giving only 0/1/2 (hard) counts and imputation accuracy information is not maintained.
 
-Use `read_plink` to choose a PLINK input format:
+To read PLINK files, use `read_plink` and choose a PLINK input format:
 
 ```python
 import hapy as hp
@@ -68,13 +68,7 @@ hladat = hp.read_plink("cohort", format="pgen")
 hladat = hp.read_plink("cohort", format="bfile")
 ```
 
-The corresponding companion files for pgen and bilfes  must share that prefix (e.g. pgen, pvar and psam, or bed, bim, fam).
-
-By default, `dosage_allele="presence"` counts **P** for HLA/AA A/P pairs or
-**T** for HLA/AA A/T pairs. Other HLA/AA allele pairs (e.g. A/G or G/T) count
-the labelled ALT allele, as do all SNPs including `SNP_`/`SNPS_` markers.
-The reader preserves allele labels; it does not infer biological amino-acid
-identities from nucleotide or other surrogate codes. 
+The corresponding companion files for pgen and bilfes  must share that prefix (e.g. pgen, pvar and psam, or bed, bim, fam) just like PLINK.
 
 SNP markers starting with `SNP_` or `SNPS_` are stored in `hladat.SNP.extradata`,
 with their metadata in `hladat.SNP.extrainfo`. Other SNPs are stored in
@@ -91,7 +85,7 @@ hladat = hp.read_bgl(
     fileloc="example.bgl.phased",
     load_types=("HLA","AA"), # loads on HLA allele and Amino Acid data
     filter_R2="example.bgl.r2", R2_minimum=0.9) # input imputation confidence and filter
-)
+
 ```
 
 ### Accesing data
@@ -112,7 +106,7 @@ hladat.SNPS.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by 
 
 ```python
 # load pheno and covariate file with pandas (be sure the index have same ID, these are sample IDs )
-pheno = pd.read_csv("example_pheno.txt",index_col=1, )
+pheno = pd.read_csv("example_pheno.txt",index_col=1, ) # Binary PLINK-style {1,2} is auto-recoded to {0,1}.
 covar = pd.read_csv("example_covar.txt", sep="\s+", index_col=1, )
 
 
@@ -132,12 +126,21 @@ results = hp.stats.analyse(
 print(results.head())
 ```
 
+
+
+### Meta-analysis
+
+```python
+inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA",pval="LR_p", variant_col="VARIANT", prefix="META")
+# `example_studies.txt` refers to a txt file listing path to all the results that will be meta-analysed, this return two separate results where 
+```
+
+example_studies.txt refers to a text file listing the paths to all association results to be meta-analysed. The function returns two separate results: `inv`, containing inverse-variance meta-analysis results for individual variants, and `stouf`, containing Stouffer's meta-analysis results for omnibus tests.
+
 ## Status
 
 The core analysis framework is functional and actively under development. Current work includes:
 - plotting and visualisation utilities
-- workflow optimisation and refactoring
-- expanded documentation and tutorials
 
 ## Intended use
 

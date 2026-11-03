@@ -171,16 +171,22 @@ def read_plink(
         R2 field in PVAR INFO, or a named PVAR column. Requires PVAR input.
         Mutually exclusive with filter_R2.
     filter_R2, R2_minimum, simpleQC, load_types
-        As in other HAPY readers. MAF filtering uses observed dosages and keeps
+        As in other `hapy` readers. MAF filtering uses observed dosages and keeps
         missing genotypes missing. load_types selects marker types before allele
         validation and dosage decoding. Only selected biallelic, diploid-scaled
         data are supported.
 
     Notes
     -----
-    Binary inputs use the pgenlib dependency installed with HAPY. PGEN dosages are
+    Binary inputs use the `pgenlib` dependency installed with `hapy`. PGEN fractional dosages are
     retained; BED supplies hardcalls represented as 0/1/2 dosage. Sample IIDs
     must be unique across families. This reader returns unphased dosages.
+
+    By default, `dosage_allele="presence"` counts **P** for HLA/AA A/P pairs or
+    **T** for HLA/AA A/T pairs. Other HLA/AA allele pairs (e.g. A/G or G/T) count
+    the labelled ALT allele, as do all SNPs including `SNP_`/`SNPS_` markers.
+    The reader preserves allele labels; it does not infer biological amino-acid
+    identities from nucleotide or other surrogate codes. 
     """
     return PLINKFileReader(
         fileloc, format=format, pvarfileloc=pvarfileloc,
