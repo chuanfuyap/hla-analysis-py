@@ -126,8 +126,6 @@ results = hp.stats.analyse(
 print(results.head())
 ```
 
-
-
 ### Meta-analysis
 
 ```python
@@ -164,46 +162,3 @@ For questions, feedback, or collaboration enquiries:
 ## Citation
 If you use HLA Analysis Py in your research, please cite this repository. If a corresponding publication becomes available, please cite the publication instead.
 
-
-### Parallel execution
-
-Set `n_jobs=1` for sequential execution, or choose `backend="thread"` or
-`backend="process"` with multiple workers. Both backends use the same models;
-rows may arrive in a different order, so compare results by variant or interaction
-identifier. Thread workers share the input data; process workers receive a copy
-of the analysis state once per worker and can therefore use more memory.
-
-Threads support callbacks defined in a notebook, including lambdas. Process
-workers require importable module-level callbacks and picklable inputs. Use
-threads for notebook-local callbacks. When launching process workers from a
-Python script, put the analysis call inside `if __name__ == "__main__":`.
-
-
-### Time-varying survival covariates
-
-`hp.stats.survival(..., dynamic_covar=changes)` uses lifelines'
-`CoxTimeVaryingFitter`. Without `dynamic_covar`, it uses ordinary `CoxPHFitter`.
-Pass one endpoint per person in `event_time` (`sample_id`, positive `time`, and
-`event` equal to 0 or 1). Repeated endpoint rows are rejected.
-
-`dynamic_covar` contains `sample_id`, `time`, and one or more changing predictors:
-
-```python
-changes = pd.DataFrame({
-    "sample_id": ["A", "A", "B"],
-    "time": [0, 5, 0],
-    "treatment": [0, 1, 0],
-})
-```
-
-Time is measured from the same origin as the endpoint. This example represents A
-starting treatment at time 5. Include a baseline value at time zero for each
-changing predictor. Values carry forward; a missing update cell means no change,
-not zero. Updates at or after a person's endpoint are ignored. Dynamic predictor
-names must differ from genotype and baseline covariate names. Categorical values
-are encoded after building the intervals.
-
-People missing baseline dynamic values or genotype/static covariates are excluded
-entirely. `N_used`, `N_event`, and `N_censored` count people; `N_intervals` counts
-interval rows. Genotype frequencies also count each included person once.
-Changing covariates do not make the genotype's fitted effect vary with time.
