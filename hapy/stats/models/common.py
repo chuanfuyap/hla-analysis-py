@@ -9,6 +9,8 @@ These functions are adapted from the legacy stats.py and kept intentionally simi
 """
 
 from __future__ import annotations
+import keyword
+
 import numpy as np
 from scipy import stats
 from sklearn.metrics import log_loss
@@ -127,8 +129,7 @@ def categorical_term(col: str, dtype) -> str:
 
     This is used for covariates and covariate-block interaction terms.
     """
+    term = col if col.isidentifier() and not keyword.iskeyword(col) else f"Q({col!r})"
     if getattr(dtype, "name", "") in ("object", "category", "string"):
-        return f"C({col})"
-    if not col.isidentifier():
-        return f'Q("{col}")'
-    return col
+        return f"C({term})"
+    return term

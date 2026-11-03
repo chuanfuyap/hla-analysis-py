@@ -38,15 +38,16 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
     Model:
       Y ~ covars + geno_col
     """
-    terms = _cov_terms(abt, covar_cols) + [geno_col]
+    geno_term = categorical_term(geno_col, abt[geno_col].dtype)
+    terms = _cov_terms(abt, covar_cols) + [geno_term]
     f = "Y ~ " + " + ".join(terms) if terms else "Y ~ 1"
     m = _fit(f, abt, model_type)
 
-    ci = m.conf_int().loc[geno_col]
+    ci = m.conf_int().loc[geno_term]
     return {
-        "Uni_p": float(m.pvalues[geno_col]),
-        "Uni_Coef": float(m.params[geno_col]), 
-        "Uni_StdErr": float(m.bse[geno_col]),
+        "Uni_p": float(m.pvalues[geno_term]),
+        "Uni_Coef": float(m.params[geno_term]),
+        "Uni_StdErr": float(m.bse[geno_term]),
         "CI_0.025": float(ci[0]),
         "CI_0.975": float(ci[1]),
     }
@@ -66,7 +67,8 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     dict with LR_p, Anova_p, multi_Coef
     """
     cov_terms = _cov_terms(abt, covar_cols)
-    alt_terms = cov_terms + geno_cols
+    geno_terms = [categorical_term(c, abt[c].dtype) for c in geno_cols]
+    alt_terms = cov_terms + geno_terms
     null_terms = cov_terms
 
     altf = "Y ~ " + " + ".join(alt_terms) if alt_terms else "Y ~ 1"
