@@ -4,6 +4,34 @@
 
 Matplotlib is the only plotting dependency. Plots are not displayed unless `show=True`.
 
+## Input and significance
+
+An ID such as `AA_DRB1_11_32552129` is parsed into gene DRB1, **amino acid sequence position 11**, 
+and **genomic coordinate 32552129**. Plots default to numeric amino acid sequence positions within one gene. Select
+`genes="DRB1"`, for example. Use `x_axis="genomic"` for physical genomic spacing
+across multiple genes. IDs are case-normalised for gene matching. No genome
+assembly or coordinate conversion is inferred; `reference_build="GRCh38"` adds a
+label only. Coordinates must all use the same reference build supplied by you.
+
+Only position-level tests are accepted. Residue/exon suffixes are rejected because
+a residue test cannot be assumed to represent an omnibus position test. Duplicate
+rows for a position raise an error. Obtain position-level tests from the amino acid association
+analysis; this module never combines residue P-values. Different genomic coordinates
+are preserved even if their gene and sequence position are the same.
+
+Select `pval_col="LR_p"` (the default when neither significance column is supplied),
+or `log10p_col="META_log10P"`. The latter means **positive −log₁₀(P)**, not log₁₀(P).
+For standard AA results with both single-column and omnibus tests, explicitly use
+`pval_col="LRp_Unip"` to plot the runner's coalesced test column. No test columns are
+silently mixed by the plotting functions. Interaction results use `I_p`.
+
+Raw P-values must satisfy `0 < P <= 1`. Strings or Decimal values such as
+`"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small
+non-zero probability that falls below the smallest representable floating-point value: supply a finite −log₁₀(P) instead. 
+Labels derive the scientific notation  and exponent directly from the log value; they do not exponentiate
+the entire tiny probability. `p_digits=3` controls displayed significant figures.
+Accuracy is limited by the precision of the input. P=1 is valid and visible.
+
 ## Choosing the X-axis
 
 The same `x_axis` options are available for `plot_aa_association()` and both
@@ -34,33 +62,6 @@ three modes. `position_unit="Mb"` formats genomic axes only; it does not scale
 amino acid sequence positions or equally spaced indices. Changing the axis never
 combines P-values or merges distinct genomic records.
 
-## Input and significance
-
-An ID such as `AA_DRB1_11_32552129` is parsed into gene DRB1, **amino acid sequence position 11**, 
-and **genomic coordinate 32552129**. Plots default to numeric amino acid sequence positions within one gene. Select
-`genes="DRB1"`, for example. Use `x_axis="genomic"` for physical genomic spacing
-across multiple genes. IDs are case-normalised for gene matching. No genome
-assembly or coordinate conversion is inferred; `reference_build="GRCh38"` adds a
-label only. Coordinates must all use the same reference build supplied by you.
-
-Only position-level tests are accepted. Residue/exon suffixes are rejected because
-a residue test cannot be assumed to represent an omnibus position test. Duplicate
-rows for a position raise an error. Obtain position-level tests from the amino acid association
-analysis; this module never combines residue P-values. Different genomic coordinates
-are preserved even if their gene and sequence position are the same.
-
-Select `pval_col="LR_p"` (the default when neither significance column is supplied),
-or `log10p_col="META_log10P"`. The latter means **positive −log₁₀(P)**, not log₁₀(P).
-For standard AA results with both single-column and omnibus tests, explicitly use
-`pval_col="LRp_Unip"` to plot the runner's coalesced test column. No test columns are
-silently mixed by the plotting functions. Interaction results use `I_p`.
-
-Raw P-values must satisfy `0 < P <= 1`. Strings or Decimal values such as
-`"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small
-non-zero probability that falls below the smallest representable floating-point value: supply a finite −log₁₀(P) instead. 
-Labels derive the scientific notation  and exponent directly from the log value; they do not exponentiate
-the entire tiny probability. `p_digits=3` controls displayed significant figures.
-Accuracy is limited by the precision of the input. P=1 is valid and visible.
 
 ## Association plot
 
