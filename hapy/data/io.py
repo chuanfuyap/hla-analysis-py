@@ -105,6 +105,9 @@ def _apply_r2_filter(
         Filtered variant dataframe.
     """
     if filter_R2 is None:
+        print("-------------------------------------------------------------------------------------------------------------------------------------------------")
+        print("NOTE: No imputation R² filtering was applied. For imputed data, filtering on imputation quality is recommended unless already performed upstream.", flush=True)
+        print("-------------------------------------------------------------------------------------------------------------------------------------------------")
         return df
 
     print("----------------------------------------------", flush=True)

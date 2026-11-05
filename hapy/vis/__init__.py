@@ -1,6 +1,4 @@
-"""
-init for `vis` subpackage for hapy package.
-"""
-#__all__ = []
+"""Publication-oriented HLA amino acid position visualisation."""
+from .plot import plot_aa_association, plot_aa_interaction
 
-from .plot import *
+__all__ = ['plot_aa_association', 'plot_aa_interaction']

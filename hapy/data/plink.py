@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import Literal
+import warnings
 
 import numpy as np
 import pandas as pd
@@ -59,7 +60,7 @@ def _effect_alleles(variants, dosage_allele):
     return effect
 
 
-def _read_raw(path, variants, effect):
+def _raw_header(path):
     # Inspect just the header first, so excluded types never become strings or
     # numeric arrays in memory. RAW uses a whitespace-delimited, single header.
     with open(path, encoding="utf-8") as stream:
@@ -75,7 +76,25 @@ def _read_raw(path, variants, effect):
     columns = [original for original, name in zip(header, normalised)
                if name not in metadata]
     parts = [column.rpartition("_") for column in columns]
-    all_names = pd.Index([part[0] for part in parts])
+    if any(not part[0] or not part[1] or not part[2] for part in parts):
+        raise ValueError("RAW genotype columns must end with _COUNTED_ALLELE")
+    names = pd.Index([part[0] for part in parts])
+    counted = pd.Series([part[2] for part in parts], index=names)
+    return iid_column, columns, names, counted
+
+
+def _raw_variants(path):
+    _, _, names, counted = _raw_header(path)
+    _validate_ids(names, "RAW variant IDs")
+    # Empty REF means unknown here, not an inferred second allele. ALT is an
+    # internal placeholder for the header's counted allele, never called ALT
+    # in the returned annotations.
+    return pd.DataFrame({"REF": "", "ALT": counted.to_numpy()}, index=names)
+
+
+def _read_raw(path, variants, effect):
+    iid_column, columns, all_names, _ = _raw_header(path)
+    parts = [column.rpartition("_") for column in columns]
     metadata_positions = variants.index.get_indexer(all_names)
     for column, (_, separator, _), position in zip(columns, parts, metadata_positions):
         if not separator or position < 0:
@@ -145,7 +164,7 @@ def read_plink(
     R2_minimum: float = 0.5,
     simpleQC: bool = True,
     load_types: tuple = ("HLA", "SNP", "AA"),
-    dosage_allele: Literal["presence", "ref", "alt"] = "presence",
+    dosage_allele: Literal["presence", "ref", "alt", "counted"] = "presence",
 ) -> HLAdata:
     """Read a PLINK RAW, PGEN/PVAR/PSAM, or BED/BIM/FAM fileset.
 
@@ -156,17 +175,25 @@ def read_plink(
     format : {"raw", "pgen", "bfile"}
         ``bfile`` means a .bed/.bim/.fam fileset, not a .bfile extension.
     pvarfileloc : path, optional
-        Variant metadata for RAW/PGEN. Defaults to <prefix>.pvar. Not used for
-        bfile, whose alleles are read from BIM (A1=ALT, A2=REF).
-    dosage_allele : {"presence", "ref", "alt"}
+        Optional for RAW: uses <prefix>.pvar when it exists, otherwise reads
+        marker IDs and counted alleles from the RAW header. Explicit paths must
+        exist. PGEN still requires PVAR. Not used for bfile, whose alleles are
+        read from BIM (A1=ALT, A2=REF).
+    dosage_allele : {"presence", "ref", "alt", "counted"}
         Default counts P or T for HLA/AA A/P or A/T presence/absence pairs.
         Other HLA/AA encodings and all SNPs count labelled ALT. Allele letters
         are retained without inferring biological residue identities.
         RAW counted-allele suffixes are checked: 2 - dosage is applied
         exactly when the requested allele is the other allele. Binary inputs
         read the requested allele directly. REF/ALT options apply to all markers.
+        RAW-only "counted" preserves each column's counted allele and dosage.
+        Without PVAR, default "presence" also preserves counted dosage with a
+        warning, because the missing allele pair prevents reliable orientation.
+        REF/ALT requests require metadata; the unknown other allele is recorded
+        as missing in alleleB. SNP coordinates are unknown unless encoded in IDs.
     pvar_rowskip : int, optional
         Explicit PVAR header offset; otherwise leading ## lines are skipped.
+        Requires an available PVAR file, as does pvar_R2_column.
     pvar_R2_column : str, optional
         R2 field in PVAR INFO, or a named PVAR column. Requires PVAR input.
         Mutually exclusive with filter_R2.
@@ -229,8 +256,10 @@ class PLINKFileReader(GenomicsFileReader):
         dosage_allele = self.dosage_allele
         if format not in {"raw", "pgen", "bfile"}:
             raise ValueError("format must be 'raw', 'pgen', or 'bfile'")
-        if dosage_allele not in {"presence", "ref", "alt"}:
-            raise ValueError("dosage_allele must be 'presence', 'ref', or 'alt'")
+        if dosage_allele not in {"presence", "ref", "alt", "counted"}:
+            raise ValueError("dosage_allele must be 'presence', 'ref', 'alt', or 'counted'")
+        if dosage_allele == "counted" and format != "raw":
+            raise ValueError("dosage_allele='counted' is only available for RAW input")
         if isinstance(load_types, str):
             load_types = (load_types,)
         if not load_types or not set(load_types).issubset({"HLA", "SNP", "AA"}):
@@ -247,6 +276,7 @@ class PLINKFileReader(GenomicsFileReader):
         if not path.is_file():
             raise FileNotFoundError(path)
 
+        inferred_raw = False
         if format == "bfile":
             if pvarfileloc is not None or pvar_R2_column is not None or pvar_rowskip is not None:
                 raise ValueError("bfile uses BIM metadata; PVAR options are not applicable")
@@ -259,7 +289,22 @@ class PLINKFileReader(GenomicsFileReader):
                 raise ValueError("FAM must contain six columns")
             samples = _validate_ids(sample_frame[1], "Sample IIDs")
         else:
-            variants = _read_pvar(pvarfileloc or prefix + ".pvar", pvar_rowskip)
+            pvar_path = Path(pvarfileloc) if pvarfileloc is not None else Path(prefix + ".pvar")
+            inferred_raw = format == "raw" and pvarfileloc is None and not pvar_path.is_file()
+            if inferred_raw:
+                if pvar_rowskip is not None or pvar_R2_column is not None:
+                    raise ValueError("PVAR options require a PVAR file; supply pvarfileloc.")
+                if dosage_allele in {"ref", "alt"}:
+                    raise ValueError("REF/ALT orientation requires a PVAR file; use dosage_allele='counted' without PVAR.")
+                variants = _raw_variants(path)
+                if dosage_allele == "presence":
+                    warnings.warn(
+                        "No PVAR found: preserving RAW counted-allele dosages. The other allele "
+                        "and presence/REF/ALT orientation cannot be inferred from RAW alone. "
+                        "Use dosage_allele='counted' to select this explicitly, or supply PVAR.",
+                        UserWarning, stacklevel=4)
+            else:
+                variants = _read_pvar(pvar_path, pvar_rowskip)
             if format == "pgen":
                 # PSAM permits ## metadata and either #FID IID or #IID headers.
                 sample_frame = _read_psam(prefix + ".psam")
@@ -277,11 +322,19 @@ class PLINKFileReader(GenomicsFileReader):
         annotations.loc[ordinary_snps, ["GENE", "POS"]] = np.nan
         selected = variants.loc[annotations["TYPE"].isin(load_types)]
         for column in ("REF", "ALT"):
+            if inferred_raw and column == "REF":
+                continue
             if selected[column].isin(["", ".", "0"]).any() or selected[column].str.contains(",", regex=False).any():
                 raise ValueError("Only biallelic variants with known REF and ALT are supported")
         if (selected["REF"] == selected["ALT"]).any():
             raise ValueError("REF and ALT must be different")
-        effect = _effect_alleles(selected, dosage_allele)
+        if inferred_raw:
+            effect = selected["ALT"].copy()
+        elif dosage_allele == "counted":
+            _, _, _, counted = _raw_header(path)
+            effect = counted.reindex(selected.index)
+        else:
+            effect = _effect_alleles(selected, dosage_allele)
         dosage = (_read_raw(path, variants, effect) if format == "raw"
                   else _read_binary(path, variants, samples, effect))
 
@@ -300,10 +353,14 @@ class PLINKFileReader(GenomicsFileReader):
             self.filter_R2 = scores.to_frame(name=1)
         alleles = pd.DataFrame({"alleleA": effect,
                                 "alleleB": selected["REF"].where(effect == selected["ALT"], selected["ALT"])})
+        if inferred_raw:
+            alleles["alleleB"] = np.nan
         data = annotations.loc[dosage.index].join(alleles).join(dosage)
         data.index.name = "SNP"
         if "POS" in variants:
             data["POS"] = pd.to_numeric(variants["POS"].reindex(data.index), errors="raise")
+        elif inferred_raw:
+            data["POS"] = pd.to_numeric(data["POS"], errors="coerce")
         return data
 
     def _annotate_variants(self, dataframe, index_name):

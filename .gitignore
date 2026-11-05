@@ -8,4 +8,5 @@ build/
 .build/
 hapy/stats/stats_old.py
 hapy/data/io_old.py
-tests/
+tests/*
+!tests/test_vis.py

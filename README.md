@@ -12,6 +12,15 @@ Currently supported input formats include:
 - PLINK-derived genotype formats
 - Beagle-derived genotype format
 
+## Intended use
+
+`hapy` is designed for:
+- HLA fine-mapping studies
+- amino-acid association analysis
+- autoimmune disease genetics
+- immunogenetics workflows
+- multi-cohort HLA association studies
+
 ## Features
 
 - Amino-acid omnibus association testing
@@ -43,7 +52,7 @@ conda activate hapy
 pip install .
 ```
 
-## Quick example
+## Quick Start
 
 ### PLINK input
 
@@ -58,7 +67,7 @@ To read PLINK files, use `read_plink` and choose a PLINK input format:
 ```python
 import hapy as hp
 
-# Text export plus its variant metadata.
+# .raw (exported by PLINK with `--export A`) 
 hladat = hp.read_plink("cohort.raw", format="raw", pvarfileloc="cohort.pvar")
 
 # Binary PLINK 2 fileset: cohort.pgen, cohort.pvar, cohort.psam.
@@ -135,19 +144,19 @@ inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA", pval="L
 
 `example_studies.txt`refers to a text file listing the paths to all association results to be meta-analysed. The function returns two separate results: `inv`, containing inverse-variance meta-analysis results for individual variants, and `stouf`, containing Stouffer's meta-analysis results for omnibus tests.
 
+### HLA amino acid position plots
+
+Use `hp.vis.plot_aa_association()` for genomic (manhattan) association plots and
+`hp.vis.plot_aa_interaction(kind="scatter3d" or "heatmap")` for genetic (GxG) interactions.
+See [visualisation documentation](docs/visualisation.md) and
+[synthetic examples](examples/visualisation/plot_examples.py).
+
 ## Status
 
 The core analysis framework is functional and actively under development. Current work includes:
-- plotting and visualisation utilities
-
-## Intended use
-
-hapy is designed for:
-- HLA fine-mapping studies
-- amino-acid association analysis
-- autoimmune disease genetics
-- immunogenetics workflows
-- multi-cohort HLA association studies
+- single residue analysis 
+- stepwise conditional analyses
+- allele mapping
 
 ## Contact
 
@@ -161,4 +170,3 @@ For questions, feedback, or collaboration enquiries:
 
 ## Citation
 If you use HLA Analysis Py in your research, please cite this repository. If a corresponding publication becomes available, please cite the publication instead.
-

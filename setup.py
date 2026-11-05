@@ -38,6 +38,7 @@ setup(name="hapy",
         'statsmodels>=0.13.0,<0.14.0',
         'lifelines>=0.27.0,<0.30.0',
         'scikit-learn>=1.0.0,<1.10.0',
-        'pgenlib>=0.90,<1'
+        'pgenlib>=0.90,<1',
+        'matplotlib>=3.6,<4'
     ],
 )
