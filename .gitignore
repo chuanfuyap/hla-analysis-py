@@ -9,4 +9,4 @@ build/
 hapy/stats/stats_old.py
 hapy/data/io_old.py
 tests/*
-!tests/test_vis.py
+tests/test_vis.py

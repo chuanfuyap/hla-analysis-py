@@ -56,7 +56,7 @@ For standard AA results with both single-column and omnibus tests, explicitly us
 silently mixed by the plotting functions. Interaction results use `I_p`.
 
 Raw P-values must satisfy `0 < P <= 1`. Strings or Decimal values such as
-`"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small, 
+`"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small
 non-zero probability that falls below the smallest representable floating-point value: supply a finite −log₁₀(P) instead. 
 Labels derive the scientific notation  and exponent directly from the log value; they do not exponentiate
 the entire tiny probability. `p_digits=3` controls displayed significant figures.
@@ -131,7 +131,7 @@ pairs. They do not form a raster, interpolate missing combinations, or assume eq
 spacing. 
 - Background (`missing_color`) indicates unobserved combinations; observed non-significant values remain coloured. Point size is in display units, not genomic bin width. 
 - Reduce `marker_size` or zoom in if nearby observations overlap. 
-- There is no binning. 
+- There is no binning performed. 
 - `annotate_cells=True` labels every observed point; otherwise only highlighted points are labelled.
 
 Repeated coordinate pairs are preserved by default (`duplicate="keep"`). Distinct
@@ -191,9 +191,5 @@ MPLBACKEND=Agg python examples/visualisation/plot_examples.py --output /tmp/hapy
 python -m pytest tests/test_vis.py
 ```
 
-The example CSVs are synthetic and demonstrate plotting, not scientific findings.
-The script writes all three plot modes in PNG, PDF and SVG. Tests cover parsing,
-position/residue distinctions, extreme significance, gene-aware highlights, sparse
-coordinates, duplicate policies, non-finite/missing values, shared scales, existing
-axes, input immutability, headless rendering and exports.
-
+The example CSVs are **synthetic** and demonstrate plotting, not scientific findings.
+The script writes all three plot modes in PNG, PDF and SVG.
