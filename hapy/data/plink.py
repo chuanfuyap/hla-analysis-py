@@ -2,7 +2,6 @@
 
 from pathlib import Path
 from typing import Literal
-import warnings
 
 import numpy as np
 import pandas as pd
@@ -187,8 +186,7 @@ def read_plink(
         exactly when the requested allele is the other allele. Binary inputs
         read the requested allele directly. REF/ALT options apply to all markers.
         RAW-only "counted" preserves each column's counted allele and dosage.
-        Without PVAR, default "presence" also preserves counted dosage with a
-        warning, because the missing allele pair prevents reliable orientation.
+        Without PVAR, default "presence" also preserves counted dosage.
         REF/ALT requests require metadata; the unknown other allele is recorded
         as missing in alleleB. SNP coordinates are unknown unless encoded in IDs.
     pvar_rowskip : int, optional
@@ -297,12 +295,6 @@ class PLINKFileReader(GenomicsFileReader):
                 if dosage_allele in {"ref", "alt"}:
                     raise ValueError("REF/ALT orientation requires a PVAR file; use dosage_allele='counted' without PVAR.")
                 variants = _raw_variants(path)
-                if dosage_allele == "presence":
-                    warnings.warn(
-                        "No PVAR found: preserving RAW counted-allele dosages. The other allele "
-                        "and presence/REF/ALT orientation cannot be inferred from RAW alone. "
-                        "Use dosage_allele='counted' to select this explicitly, or supply PVAR.",
-                        UserWarning, stacklevel=4)
             else:
                 variants = _read_pvar(pvar_path, pvar_rowskip)
             if format == "pgen":
