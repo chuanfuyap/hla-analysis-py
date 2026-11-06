@@ -80,14 +80,13 @@ bundled files; the reader prints a note. `simpleQC=True` still applies the share
 
 `model_type="logit"` is appropriate for this binary phenotype. HAPY automatically
 recodes PLINK phenotype values `{1, 2}` to `{0, 1}`: 1 is control and 2 is case.
-SEX is explicitly categorical; PCs are continuous. For a continuous phenotype in
-your own data, use `StandardConfig(model_type="linear")` with that phenotype,
-rather than treating the bundled binary outcome as continuous.
+For a continuous phenotype in your own data, use `StandardConfig(model_type="linear")` 
+with that phenotype, rather than treating the bundled binary outcome as continuous.
 
 Pass `y` as an IID-indexed Series. Arrays require a FAM table whose row order
 matches the array. `famfile` is unnecessary when supplying the indexed Series.
 Covariates should be an IID-indexed DataFrame. For the bundled whitespace-delimited
-files, load them explicitly with pandas rather than passing their paths to the
+files, load them explicitly with `pandas` rather than passing their paths to the
 CSV-oriented covariate loader.
 
 Per position, rows missing phenotype, genotype or a model covariate are excluded.
@@ -127,35 +126,13 @@ conditional = hp.stats.analyse(
 
 The conditioning position is added to the model as covariates and excluded from
 the tested positions. This asks about associations after adjustment; it is not an
-interaction test. It changes the fitted model and can change P-values. Multiple
+interaction test. It changes the fitted model and can change p-values. Multiple
 positions can be supplied as a list. Equivalent script invocation:
 
-```bash
-python examples/association/run_association.py --condition-on AA_DRB1_231_32548054 --output /tmp/hapy_conditional
-```
 
 ## Parallel execution
 
-```bash
-python examples/association/run_association.py --n-jobs 2 --backend thread --output /tmp/hapy_threads
-python examples/association/run_association.py --n-jobs 2 --backend process --output /tmp/hapy_processes
-```
-
-Threads are convenient in notebooks. Process workers require importable callbacks
+"Threads" are convenient in notebooks. "Process" workers require importable callbacks
 and a script entry-point guard (`if __name__ == "__main__":`), already included in
 the supplied script. Completion order can differ: compare rows by `VARIANT`.
 With only four positions, worker startup can outweigh any speed benefit.
-
-## Check the examples
-
-Install pytest in your development environment, then run:
-
-```bash
-MPLBACKEND=Agg python -m pytest -q tests/test_association_example.py
-```
-
-The checks use the bundled inputs, verify case/control counts and both test paths,
-compare shuffled sample tables and threaded results, exercise conditional analysis,
-and confirm CSV/PNG/PDF/SVG exports. They live in the local `tests/` directory and remain excluded from GitHub by
-the existing ignore rule. These commands require that local test file to be present. They do not assert that any specific
-association should be significant, or encode a particular biological conclusion.
