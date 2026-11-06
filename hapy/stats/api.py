@@ -68,6 +68,7 @@ def analyse(
         Context schema is documented in hapy.stats.filters.
     condition_on:
         Optional variant input for conditional analysis
+        For AA analysis, use only the the variant name up to the genomic position, e.g. "AA_DRB1_11_32552129"
     verbose:
         If True, prints progress messages with flush=True.
     use_progress_bar:

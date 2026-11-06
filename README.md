@@ -113,6 +113,9 @@ hladat.SNPS.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by 
 
 ### Running association analyses
 
+See the [association guide](docs/association.md) for more details and
+[bundled example](examples/association/) to have an idea what the data formats should look like.
+
 ```python
 # load pheno and covariate file with pandas (be sure the index have same ID, these are sample IDs )
 pheno = pd.read_csv("example_pheno.txt",index_col=1, ) # Binary PLINK-style {1,2} is auto-recoded to {0,1}.
