@@ -137,7 +137,7 @@ positions can be supplied as a list. Equivalent script invocation:
 
 ## Variant Filtering
 
-Two options available, either on specific variant, or amino position, e.g.
+Two options are available, either on specific variant, or amino position, e.g.
 
 ```python
 variant_filter=hp.stats.filters.only_variants_variant([
