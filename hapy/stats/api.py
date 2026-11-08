@@ -125,8 +125,8 @@ def analyse_many(
     use_progress_bar: bool = False,
     print_every: int = 100,
 ) -> dict[str, pd.DataFrame]:
-    """Run standard association analysis separately for multiple phenotype column.
-    Phenotypes are fitted sequentially within each variant task, reusing shared preparation.
+    """Run standard association analysis separately for multiple phenotype columns.
+    Phenotypes are fitted sequentially within each variant task, reusing shared preparation to save time.
 
     Parameters
     ----------
@@ -172,16 +172,9 @@ def analyse_many(
 
     Notes
     -----
-    Shared genotype/covariate preparation is reused within each variant; final
-    complete-case tables and model fits remain phenotype-specific. Conditioning
-    genotypes are built once. A variant_filter is evaluated once per candidate
-    variant after genotype preparation, with populated geno_cols. Its decision
-    applies to all phenotypes. Process workers require a picklable module-level
-    callback; threads support local callbacks. No cross-trait P-value adjustment
-    or automatic file saving is performed.
     All phenotypes share config; use separate calls for different model types.
-    Errors stop execution and identify the phenotype; they are not suppressed.
-    Inputs are not modified. Storage grows with the number of result tables.
+
+    Storage memory grows with the number of result tables.
 
     Examples
     --------
