@@ -381,17 +381,6 @@ def _run_many_one_variant(variant_id, *, state):
         exc.add_note(f"While preparing genotype columns for variant {variant_id!r}.")
         raise
     geno_cols = list(geno.columns)
-    variant_filter = state['variant_filter']
-    if variant_filter is not None:
-        ctx = dict(analysis='standard', kind=adapter.KIND, variant_id=variant_id,
-                   meta=dict(meta), geno_cols=list(geno_cols))
-        try:
-            if not variant_filter(ctx):
-                return {}  # Omit the variant from every phenotype's output.
-        except Exception as exc:
-            exc.add_note(f"While filtering variant {variant_id!r}.")
-            raise
-
     predictors = build_model_predictors(geno, state['covdf'])
     results = {}
     for name, y in state['phenotypes'].items():
@@ -445,19 +434,25 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
         covar_cols.extend(adjustment.columns)
 
     variants = [v for v in adapter.iter_variants(hladat) if v not in set(conditions)]
+    if variant_filter is not None:
+        info_df = getattr(hladat, adapter.KIND).info
+        selected = []
+        for variant_id in variants:
+            rows = info_df[info_df['AA_ID'] == variant_id] if 'AA_ID' in info_df else info_df.loc[info_df.index == variant_id]
+            meta = rows.iloc[0].to_dict() if len(rows) else {}
+            ctx = dict(analysis='standard', kind=adapter.KIND,
+                       variant_id=variant_id, meta=meta, geno_cols=[])
+            if variant_filter(ctx):
+                selected.append(variant_id)
+        variants = selected
     state = dict(adapter=adapter, hladat=hladat, sample_index=index, covdf=covdf,
                  covar_cols=covar_cols, phenotypes=ys, model_type=config.model_type,
-                 condition_on_list=conditions, variant_filter=variant_filter)
+                 condition_on_list=conditions)
     if verbose:
         print("----------------", flush=True)
         print(f"STARTING ANALYSES on:\t{adapter.KIND}, model={config.model_type}", flush=True)
-        if variant_filter is None:
-            print(f"VARIANTS SCHEDULED FOR ANALYSIS:\t{len(variants)}", flush=True)
-            print(f'Analysing {len(ys)} phenotypes across {len(variants)} variants with shared preparation.', flush=True)
-        else:
-            print(f"CANDIDATE VARIANTS TO SCREEN:\t{len(variants)}", flush=True)
-            print(f'Analysing {len(ys)} phenotypes; variant_filter is applied once per candidate. '
-                  'The retained count will be reported after screening.', flush=True)
+        print(f"VARIANTS SCHEDULED FOR ANALYSIS:\t{len(variants)}", flush=True)
+        print(f'Analysing {len(ys)} phenotypes across {len(variants)} variants with shared preparation.', flush=True)
         if conditions:
             print(f"CONDITIONING ON:\t{conditions}", flush=True)
         print(
@@ -467,15 +462,13 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
         )
         print("----------------", flush=True)
         print()
-    progress = ProgressPrinter(total=len(variants), desc=f'standard_many[{adapter.KIND}]' + (' screening' if variant_filter is not None else ''),
+    progress = ProgressPrinter(total=len(variants), desc=f'standard_many[{adapter.KIND}]',
         use_tqdm=use_progress_bar, print_every=print_every) if verbose else None
     rows = {name: [] for name in ys}
-    retained_variants = 0
 
     for batch in parallel_imap_batched(partial(_run_many_one_variant, state=state), variants,
             config.n_jobs, config.backend, batch_size=getattr(config, 'batch_size', 32),
             max_in_flight=getattr(config, 'chunksize', None)):
-        retained_variants += bool(batch)
         for name, row in batch.items():
             rows[name].append(row)
         if progress is not None:
@@ -483,10 +476,6 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
 
     if progress is not None:
         progress.close()
-
-    if verbose and variant_filter is not None:
-        print(f"VARIANTS PASSING variant_filter:\t{retained_variants} of {len(variants)} "
-              f"({len(variants) - retained_variants} excluded)", flush=True)
 
     results = {}
     for name, values in rows.items():
