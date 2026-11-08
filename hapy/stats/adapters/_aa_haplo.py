@@ -291,6 +291,8 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
         haplodf = makehaploprob(aadf)
         aalist = list(haplodf.columns)
         AAcount = len(aalist)
+        if haplodf.shape[1] == 0:
+            return haplodf, 0, None, [], 0
 
         refix = np.argmax(haplodf.sum())
         refAA = haplodf.columns[refix]

@@ -129,6 +129,8 @@ class AAAdapter:
 
         df.index = df.index.astype(str)
         df = subset_samples_beagle_orientation(df, sample_index, hladat.type)
+        if df.shape[1] == 0:
+            raise ValueError(f"{variant_id}: no overlapping genotype/phenotype sample IDs.")
 
         df["AA_ID"] = info["AA_ID"]
         aadf = df[df["AA_ID"] == variant_id]
@@ -156,4 +158,12 @@ class AAAdapter:
             )
         }
 
+        if haplodf.shape[1] == 0:
+            meta['SKIPPED'] = True
+            unsupported_labels = (hladat.type == 'softcall' and len(aadf) > 1
+                                  and not any(len(str(marker).rsplit('_', 1)[-1]) == 1 for marker in aadf.index))
+            meta['SKIP_REASON'] = (
+                'No eligible AA genotype columns: no supported single-residue labels.' if unsupported_labels
+                else 'No eligible AA genotype columns: insufficient variation after subsetting to analysis samples.'
+            )
         return haplodf, meta

@@ -43,6 +43,35 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _retain_aa_skip_status(out):
+    """Retain explicit status and missing P-values even when every test skips."""
+    if 'SKIP_REASON' in out:
+        out = out.copy()
+        out['SKIPPED'] = out['SKIPPED'].fillna(False).astype(bool)
+        for col in ['LR_p', 'Uni_p', 'LRp_Unip']:
+            if col not in out:
+                out[col] = np.nan
+    return out
+
+
+def _report_aa_skips(tables):
+    frequency_skips, label_skips = set(), set()
+    for table in tables:
+        if 'SKIP_REASON' in table:
+            frequency = table.SKIP_REASON.str.contains('insufficient variation', na=False)
+            labels = table.SKIP_REASON.str.contains('no supported single-residue labels', na=False)
+            frequency_skips.update(table.loc[frequency, 'VARIANT'])
+            label_skips.update(table.loc[labels, 'VARIANT'])
+    for variants, reason in [
+        (frequency_skips, 'insufficient variation remained after subsetting to analysis samples'),
+        (label_skips, 'no supported single-residue columns were available'),
+    ]:
+        if variants:
+            plural = 'position' if len(variants) == 1 else 'positions'
+            print(f'{len(variants)} AA {plural} skipped because {reason}. '
+                  'See SKIPPED and SKIP_REASON.', flush=True)
+
+
 def _af_from_col(s: pd.Series) -> float:
     return float(s.mean() / 2.0)
 
@@ -333,8 +362,12 @@ def run_standard(
             out[c] = out[c].replace("", np.nan)
 
     out = _clean_output(out)
+    if adapter.KIND == 'AA':
+        out = _retain_aa_skip_status(out)
 
     if verbose:
+        if adapter.KIND == 'AA':
+            _report_aa_skips([out])
         print(f"standard[{adapter.KIND}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
 
     return out
@@ -453,8 +486,12 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
             if col in out:
                 out[col] = out[col].replace('', np.nan)
         results[name] = _clean_output(out)
+        if adapter.KIND == 'AA':
+            results[name] = _retain_aa_skip_status(results[name])
 
     if verbose:
+        if adapter.KIND == 'AA':
+            _report_aa_skips(results.values())
         print(f"standard[{adapter.KIND}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
     _many_saving_message(verbose)
     return results
