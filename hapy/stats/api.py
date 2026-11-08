@@ -6,14 +6,15 @@ This module provides stable entrypoints for:
 - interaction tests (linear/logit): interaction(...)
 - survival tests (Cox PH): survival(...)
 
-All functions accept pandas DataFrames and return pandas DataFrames suitable for CSV export.
+Analysis functions return result DataFrames; analyse_many returns a dictionary
+of result DataFrames keyed by phenotype name.
 """
 
 from __future__ import annotations
 import pandas as pd
 
 from .types import StandardConfig, InteractionConfig, SurvivalConfig
-from .runners.standard_runner import run_standard
+from .runners.standard_runner import run_standard, run_standard_many
 from .runners.interaction_runner import run_interaction
 from .runners.survival_runner import run_survival
 
@@ -43,17 +44,17 @@ def analyse(
 
     Parameters
     ----------
-    hladat:
+    hladat : pandas.DataFrame or None, default None
         Your HLAdat object containing genotype blocks (AA/HLA/SNP) and corresponding info.
-    famfile:
+    famfile : pandas.DataFrame or None, default None
         PLINK Fam file imported with read_famfile:
         - IID: sample identifier
         - PHENO: phenotype (if y is not provided). Binary PLINK-style {1,2} is auto-recoded to {0,1}.
     config:
         StandardConfig specifying model type ("linear" or "logit") and parallel settings.
-    kind:
+    kind : {'AA', 'HLA', 'SNP'}
         Which genotype block to analyse. Must be one of: "AA", "HLA", "SNP".
-    covar:
+    covar: pandas.DataFrame, str, pathlib.Path or None, default None
         Optional covariate table:
         - pandas DataFrame indexed by IID, or
         - str path to a CSV with IID as its index (index_col=0).
@@ -63,17 +64,17 @@ def analyse(
         - None: use famfile.PHENO
         - pandas Series indexed by IID
         - array-like aligned to famfile row order
-    variant_filter:
+    variant_filter : callable or None, default None
         Optional callable(ctx)->bool that can drop variants before fitting.
         Context schema is documented in hapy.stats.filters.
-    condition_on:
+    condition_on : str, sequence of str or None, default None
         Optional variant input for conditional analysis
         For AA analysis, use only the the variant name up to the genomic position, e.g. "AA_DRB1_11_32552129"
-    verbose:
+    verbose : bool, default True
         If True, prints progress messages with flush=True.
-    use_progress_bar:
+    use_progress_bar : bool, default False
         If True, uses tqdm progress bar if tqdm is installed; otherwise falls back to periodic prints.
-    print_every:
+    print_every : int, default 100
         If tqdm is not used, print a progress update every N completed variants.
 
     Returns
@@ -109,6 +110,111 @@ def analyse(
         use_progress_bar=use_progress_bar,
         print_every=print_every,
     )
+
+def analyse_many(
+    hladat,
+    config: StandardConfig,
+    *,
+    kind: str,
+    phenotypes: pd.DataFrame,
+    famfile: pd.DataFrame = None,
+    covar=None,
+    variant_filter=None,
+    condition_on: str | list[str] | None = None,
+    verbose: bool = True,
+    use_progress_bar: bool = False,
+    print_every: int = 100,
+) -> dict[str, pd.DataFrame]:
+    """Run standard association analysis separately for multiple phenotype column.
+    Phenotypes are fitted sequentially within each variant task, reusing shared preparation.
+
+    Parameters
+    ----------
+    hladat : HLAdata
+        Your HLAdat object containing genotype blocks (AA/HLA/SNP) and corresponding info.
+    config : StandardConfig
+        StandardConfig specifying model type ("linear" or "logit") and parallel settings.
+    kind : {'AA', 'HLA', 'SNP'}
+        Which genotype block to analyse. Must be one of: "AA", "HLA", "SNP".
+    phenotypes : pandas.DataFrame
+        Nonempty table indexed by unique sample IIDs. Each uniquely named,
+        nonblank string column is one phenotype and becomes a result dict key.
+        Missing values and PLINK {1, 2} recoding are handled per phenotype by
+        analyse(). Select desired columns before passing the table.
+    famfile : pandas.DataFrame or None, default None
+        PLINK Fam file imported with read_famfile:
+        - IID: sample identifier
+        - PHENO: phenotype (if y is not provided). Binary PLINK-style {1,2} is auto-recoded to {0,1}.
+    covar : pandas.DataFrame, str, pathlib.Path or None, default None
+        Optional covariate table:
+        - pandas DataFrame indexed by IID, or
+        - str path to a CSV with IID as its index (index_col=0).
+        Covariates may be numeric and/or categorical strings.
+    variant_filter : callable or None, default None
+        Callable(ctx)->bool, evaluated once per tested variant with populated
+        genotype columns. False omits that variant from every phenotype output.
+        Conditioning variants are not filtered. Context schema: hapy.stats.filters
+    condition_on : str, sequence of str or None, default None
+        Optional variant input for conditional analysis
+        For AA analysis, use only the the variant name up to the genomic position, e.g. "AA_DRB1_11_32552129"
+    verbose : bool, default True
+        If True, prints progress messages with flush=True.
+    use_progress_bar : bool, default False
+       If True, uses tqdm progress bar if tqdm is installed; otherwise falls back to periodic prints.
+    print_every : int, default 100
+        If tqdm is not used, print a progress update every N completed variants.
+
+    Returns
+    -------
+    dict[str, pandas.DataFrame]
+        One independent result table per phenotype, in input column order.
+        Each has its own modelling samples, QC counts, frequencies and P-values.
+
+    Notes
+    -----
+    Shared genotype/covariate preparation is reused within each variant; final
+    complete-case tables and model fits remain phenotype-specific. Conditioning
+    genotypes are built once. A variant_filter is evaluated once per candidate
+    variant after genotype preparation, with populated geno_cols. Its decision
+    applies to all phenotypes. Process workers require a picklable module-level
+    callback; threads support local callbacks. No cross-trait P-value adjustment
+    or automatic file saving is performed.
+    All phenotypes share config; use separate calls for different model types.
+    Errors stop execution and identify the phenotype; they are not suppressed.
+    Inputs are not modified. Storage grows with the number of result tables.
+
+    Examples
+    --------
+    >>> results = analyse_many(
+    ...     hladat, config, kind='AA',
+    ...     phenotypes=phenotypes[['T1D', 'RA', 'IBD']], covar=covar)
+    >>> ra_results = results['RA']
+    >>> for name, result in results.items():
+    ...     result.to_csv(f'output.{name}.txt', sep='\t', index=False)
+    """
+    if kind not in _KIND_MAP:
+        raise ValueError(
+            f"Unknown kind={kind}. Must be one of {sorted(_KIND_MAP)}"
+        )
+
+    if not hasattr(hladat, kind):
+        raise ValueError(f"{kind} not loaded.")
+
+    adapter = _KIND_MAP[kind]
+    return run_standard_many(
+        adapter,
+        hladat,
+        config,
+        phenotypes=phenotypes,
+        famfile=famfile,
+        covar=covar,
+        variant_filter=variant_filter,
+        condition_on=condition_on,
+        verbose=verbose,
+        use_progress_bar=use_progress_bar,
+        print_every=print_every,
+    )
+
 
 def interaction(
     hladat,

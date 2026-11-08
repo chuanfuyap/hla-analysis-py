@@ -268,6 +268,40 @@ def make_model_table(geno_df: pd.DataFrame, y: pd.Series, cov: pd.DataFrame | No
     return abt, qc
 
 
+def build_model_predictors(geno_df, cov=None):
+    """Join shared predictors without excluding any phenotype's missing rows."""
+    geno_df = geno_df.copy()
+    geno_df.index = sample_index(geno_df.index, source="Genotypes")
+    if cov is None:
+        return geno_df
+    cov = cov.copy()
+    cov.index = sample_index(cov.index, source="Covariates")
+    return pd.concat([geno_df, cov], axis=1)
+
+
+def attach_model_phenotype(predictors, y):
+    """Create an independent complete-case ABT and QC for one phenotype."""
+    y = y.copy()
+    y.index = sample_index(y.index, source="Phenotype")
+    y.name = "Y"
+    abt = pd.concat([predictors, y.to_frame()], axis=1)
+    n_total = int(abt.shape[0])
+    n_missing_y = int(abt["Y"].isna().sum())
+
+    abt = abt.dropna(subset=["Y"])
+    n_dropped_other = int(abt.isna().any(axis=1).sum())
+    abt = abt.dropna(axis=0)
+
+    qc = {
+        "N_total": n_total,
+        "N_missing_Y": n_missing_y,
+        "N_dropped_other": n_dropped_other,
+        "N_used": int(abt.shape[0]),
+        **_case_control_counts(abt),
+    }
+    return abt, qc
+
+
 def build_survival_table(
     geno_df: pd.DataFrame,
     event_time: pd.DataFrame,

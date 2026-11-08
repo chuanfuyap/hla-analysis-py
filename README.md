@@ -160,6 +160,7 @@ The core analysis framework is functional and actively under development. Curren
 - single residue analysis 
 - stepwise conditional analyses
 - allele mapping
+- motif analysis
 
 ## Contact
 

@@ -9,12 +9,13 @@ Unified analysis entrypoints:
 This module exports configs and filter utilities.
 """
 
-from .api import analyse, interaction, survival
+from .api import analyse, analyse_many, interaction, survival
 from .types import StandardConfig, InteractionConfig, SurvivalConfig
 from . import filters as filters
 
 __all__ = [
     "analyse",
+    "analyse_many",
     "interaction",
     "survival",
     "StandardConfig",
