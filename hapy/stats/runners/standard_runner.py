@@ -451,8 +451,13 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
     if verbose:
         print("----------------", flush=True)
         print(f"STARTING ANALYSES on:\t{adapter.KIND}, model={config.model_type}", flush=True)
-        print(f"VARIANTS SCHEDULED FOR ANALYSIS:\t{len(variants)}", flush=True)
-        print(f'Analysing {len(ys)} phenotypes across {len(variants)} variants with shared preparation.', flush=True)
+        if variant_filter is None:
+            print(f"VARIANTS SCHEDULED FOR ANALYSIS:\t{len(variants)}", flush=True)
+            print(f'Analysing {len(ys)} phenotypes across {len(variants)} variants with shared preparation.', flush=True)
+        else:
+            print(f"CANDIDATE VARIANTS TO SCREEN:\t{len(variants)}", flush=True)
+            print(f'Analysing {len(ys)} phenotypes; variant_filter is applied once per candidate. '
+                  'The retained count will be reported after screening.', flush=True)
         if conditions:
             print(f"CONDITIONING ON:\t{conditions}", flush=True)
         print(
@@ -462,13 +467,15 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
         )
         print("----------------", flush=True)
         print()
-    progress = ProgressPrinter(total=len(variants), desc=f'standard_many[{adapter.KIND}]',
+    progress = ProgressPrinter(total=len(variants), desc=f'standard_many[{adapter.KIND}]' + (' screening' if variant_filter is not None else ''),
         use_tqdm=use_progress_bar, print_every=print_every) if verbose else None
     rows = {name: [] for name in ys}
+    retained_variants = 0
 
     for batch in parallel_imap_batched(partial(_run_many_one_variant, state=state), variants,
             config.n_jobs, config.backend, batch_size=getattr(config, 'batch_size', 32),
             max_in_flight=getattr(config, 'chunksize', None)):
+        retained_variants += bool(batch)
         for name, row in batch.items():
             rows[name].append(row)
         if progress is not None:
@@ -476,6 +483,10 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
 
     if progress is not None:
         progress.close()
+
+    if verbose and variant_filter is not None:
+        print(f"VARIANTS PASSING variant_filter:\t{retained_variants} of {len(variants)} "
+              f"({len(variants) - retained_variants} excluded)", flush=True)
 
     results = {}
     for name, values in rows.items():

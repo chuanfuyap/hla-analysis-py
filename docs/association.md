@@ -132,7 +132,43 @@ positions can be supplied as a list. Equivalent script invocation:
 
 ## Parallel execution
 
-"Threads" are convenient in notebooks. "Process" workers require importable callbacks
-and a script entry-point guard (`if __name__ == "__main__":`), already included in
-the supplied script. Completion order can differ: compare rows by `VARIANT`.
-With only four positions, worker startup can outweigh any speed benefit.
+"Threads" are the option to use in jupyter notebooks when parallel execution is used.
+"Process" workers require importable callbacks and a script entry-point guard (`if __name__ == "__main__":`), meaning when using a `.py` file.
+
+## Variant Filtering
+
+Two options available, either on specific variant, or amino position, e.g.
+
+```python
+variant_filter=hp.stats.filters.only_variants_variant([
+    "AA_DRB1_11_32552129",
+    "AA_DRB1_13_32552123",
+])
+
+res = hp.stats.analyse_many(
+    hladat=hladat,
+    phenotypes=pheno,
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    variant_filter=variant_filter,
+)
+```
+
+Or filtering on specific HLA genes, e.g.
+
+```python
+variant_filter=hp.stats.filters.only_genes_variant([
+    "DRB1", "DQB1",
+])
+
+
+res = hp.stats.analyse_many(
+    hladat=hladat,
+    phenotypes=pheno,
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    variant_filter=variant_filter,
+)
+```
