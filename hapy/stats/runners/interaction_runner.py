@@ -8,7 +8,6 @@ Pairwise:
 
 Omnibus:
 - AA-only block omnibus rule enforced
-- includes AA_AF_by_col_str on final modelling rows
 
 Conditional A-side adjustment:
 - optional same-kind condition_on_a variants are built from adapter_a
@@ -139,7 +138,6 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
                 "AA_variant": a_id,        # identifier for AA block variant
                 "Anchor_variant": b_id,    # identifier for anchor variant
                 "Anchor_col": anchor_col,  # actual anchor column tested
-                "AA_AF_by_col_str": np.nan,
                 "B_AF": np.nan,
                 "Anchor_AF": np.nan,
                 # Prefix metadata from the AA block side
@@ -154,10 +152,6 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
             row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
             return row
         row["Anchor_AF"] = _af_safe(abt[anchor_col])
-        # Compute allele frequency summary for the AA block columns
-        # using only the final analysis table rows
-        # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-        # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
 
         # Fit omnibus interaction model:
         # anchor_col x all block_cols jointly
@@ -197,7 +191,6 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
             "AA_variant": b_id,        # identifier for AA block variant
             "Anchor_variant": a_id,    # identifier for anchor variant
             "Anchor_col": anchor_col,  # actual anchor column tested
-            "AA_AF_by_col_str": np.nan,
             "A_AF": np.nan,
             "Anchor_AF": np.nan,
             # Prefix metadata from anchor side
@@ -215,9 +208,6 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
         return row
     row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
-    # Compute AF summary for the AA block columns on final modelling rows
-    # af_by = {c: float(abt[c].mean() / 2.0) for c in block_cols if pd.api.types.is_numeric_dtype(abt[c])}
-    # row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()]) if af_by else np.nan
 
     # Fit omnibus interaction model:
     # anchor_col x all block_cols jointly
@@ -639,7 +629,7 @@ def run_interaction(
         print(f"interaction[omnibus] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
 
     # clean: drop all-empty columns; also allow empty strings to be dropped
-    for c in ("AA_AF_by_col_str", "I_block_coefs"):
+    for c in ("I_block_coefs",):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
     out = out.dropna(axis=1, how="all")

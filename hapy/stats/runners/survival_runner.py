@@ -1,16 +1,6 @@
 """
 Survival runner: Cox PH regression per variant (batched).
-
-Option A policy
----------------
-- Single-column genotype: report coefficient Wald test p-value (p) + HR/CI.
-- Multi-column genotype block (e.g., AA): report omnibus LR_p only.
-- LRp_Unip is the coalesced p-value: LR_p if present else p.
-
-Parallelism
------------
-Uses batch-per-future execution via parallel_imap_batched.
-
+P
 Note
 ----
 lifelines does not support statsmodels formula C() terms, so categorical columns are one-hot encoded
@@ -79,41 +69,22 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
     row.update(qc)
 
     if qc["N_used"] == 0 or len(geno_cols) == 0:
-        row.update({"LR_p": np.nan, "p": np.nan, "HR": np.nan,"StdErr":np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
+        row.update({"P-value": np.nan, "HR": np.nan,"StdErr":np.nan, "CI-lower": np.nan, "CI-upper": np.nan})
         return row
 
     # Count each person once, regardless of how many intervals they contribute.
     frequency_df = cox_df.drop_duplicates("sample_id")
 
-    # Frequencies on FINAL modelling rows
-    if adapter.KIND == "SNP":
-        if len(geno_cols) == 1 and geno_cols[0] in cox_df.columns:
+    # Frequencies for single-column tests on final modelling samples.
+    if len(geno_cols) == 1 and geno_cols[0] in cox_df.columns:
+        if adapter.KIND == "SNP":
             row["MAF"] = _maf_from_col(frequency_df[geno_cols[0]])
-        else:
-            maf_by = {c: _maf_from_col(frequency_df[c]) for c in geno_cols if c in cox_df.columns}
-            if maf_by:
-                row["MAF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in maf_by.items()])
-
-    elif adapter.KIND == "HLA":
-        if len(geno_cols) == 1 and geno_cols[0] in cox_df.columns:
+        elif adapter.KIND == "HLA":
             row["HLA_AF"] = _af_from_col(frequency_df[geno_cols[0]])
-        else:
-            pieces = []
-            for c in geno_cols:
-                if c in cox_df.columns:
-                    pieces.append(f"{c}:af={_af_from_col(frequency_df[c]):.6g}")
-            if pieces:
-                row["HLA_freqs_str"] = ";".join(pieces)
-
-    elif adapter.KIND == "AA":
-        af_by = {c: _af_from_col(frequency_df[c]) for c in geno_cols if c in cox_df.columns}
-        if af_by:
-            row["AA_AF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in af_by.items()])
 
     # Option A stats
     if len(geno_cols) == 1:
         row.update(fit_cox_univariate(cox_df, geno_cols[0]))  # fills p/HR/CI
-        row["LR_p"] = np.nan
         return row
 
     # Multi-column: omnibus LR only
@@ -126,8 +97,8 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
     nul = fit_cox_model(abt[null_cols])
     null_ll = float(nul.log_likelihood_)
 
-    row["LR_p"] = lrtest_cox(alt_ll, null_ll, dof=len(geno_cols))
-    row.update({"p": np.nan, "HR": np.nan,"StdErr":np.nan, "CI_0.025": np.nan, "CI_0.975": np.nan})
+    row["P-value"] = lrtest_cox(alt_ll, null_ll, dof=len(geno_cols))
+    row.update({"HR": np.nan,"StdErr":np.nan, "CI-lower": np.nan, "CI-upper": np.nan})
     return row
 
 
@@ -203,16 +174,6 @@ def run_survival(
         prog.close()
 
     out = pd.DataFrame(rows)
-
-    # Coalesce LR_p and p
-    if "LR_p" in out.columns and "p" in out.columns:
-        out["LRp_Unip"] = out["LR_p"].combine_first(out["p"])
-
-    # Clean columns
-    for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str"):
-        if c in out.columns:
-            out[c] = out[c].replace("", np.nan)
-    #out = _clean_output(out)
 
     if verbose:
         print(f"survival[{kind}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)

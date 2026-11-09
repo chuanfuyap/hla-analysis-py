@@ -83,8 +83,8 @@ def analyse(
         One row per tested variant (position/allele depending on kind), including:
         - variant meta fields (GENE/POS/etc when available)
         - QC fields: N_total, N_missing_Y, N_dropped_other, N_used, N_case, N_control
-        - frequency fields: MAF / HLA_AF+counts / AA_AF_by_col_str
-        - model fields: Uni_p/Uni_Coef/CI... and/or LR_p/Anova_p for omnibus tests
+        - frequency fields: MAF / HLA_AF / AA_AF
+        - model fields: Beta/StdErr/CI/Statistic
 
     Notes
     -----

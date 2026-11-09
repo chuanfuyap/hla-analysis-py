@@ -110,6 +110,10 @@ groups these by position into output IDs such as `AA_DPB1_69_33048646`.
 | `CI-lower`, `CI-upper` | Lower and upper limits of the 95% confidence interval, reported for SINGLE tests only. Their direction depends on the counted allele encoding. For logistic regression, apply `np.exp()` to these limits to obtain the 95% confidence interval for the odds ratio. |
 | `AA_AF`, `Ref_AA`, `Amino_Acids`, `AAcount` | Adapter annotations; biological interpretation depends on correct dosage orientation. |
 
+If survival analysis was carried out:
+
+| `HR`, `StdErr`, `CI-lower`, `CI-upper` | Hazard ratio, standard error of the log-hazard coefficient and lower and upper limits of the 95% confidence interval for the hazard ratio. Reported for SINGLE tests only. HR > 1 indicates increased hazard and HR < 1 indicates decreased hazard per unit increase in genotype dosage. |
+
 ## Conditional association
 
 Adjust for one or more positions from the same AA block:

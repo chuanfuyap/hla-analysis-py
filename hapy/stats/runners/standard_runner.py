@@ -135,12 +135,8 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
 
     if adapter.KIND == "SNP":
         row.setdefault("MAF", np.nan)
-        row.setdefault("MAF_by_col_str", np.nan)
     elif adapter.KIND == "HLA":
         row.setdefault("HLA_AF", np.nan)
-        row.setdefault("HLA_freqs_str", np.nan)
-    elif adapter.KIND == "AA":
-        row.setdefault("AA_AF_by_col_str", np.nan)
 
     row.setdefault("P-value", np.nan)
     row.setdefault("TEST", np.nan)
@@ -153,19 +149,11 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     if qc["N_used"] == 0 or len(geno_cols) == 0:
         return row
 
-    if adapter.KIND == "SNP":
-        maf_by = {c: _maf_from_col(abt[c]) for c in geno_cols}
-        if len(geno_cols) == 1:
-            row["MAF"] = maf_by[geno_cols[0]]
-        else:
-            row["MAF_by_col_str"] = ";".join([f"{k}={v:.6g}" for k, v in maf_by.items()])
-
-    elif adapter.KIND == "HLA":
-        if len(geno_cols) == 1:
+    if len(geno_cols) == 1:
+        if adapter.KIND == "SNP":
+            row["MAF"] = _maf_from_col(abt[geno_cols[0]])
+        elif adapter.KIND == "HLA":
             row["HLA_AF"] = _af_from_col(abt[geno_cols[0]])
-        else:
-            pieces = [f"{c}:af={_af_from_col(abt[c]):.6g}" for c in geno_cols]
-            row["HLA_freqs_str"] = ";".join(pieces) if pieces else np.nan
 
     if len(geno_cols) == 1:
         row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
@@ -350,7 +338,7 @@ def run_standard(
 
     out = pd.DataFrame(rows)
 
-    for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str", "COND_VARIANTS", "SKIPPED_COND_VARIANTS"):
+    for c in ("COND_VARIANTS", "SKIPPED_COND_VARIANTS"):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
 
@@ -473,7 +461,7 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
     results = {}
     for name, values in rows.items():
         out = pd.DataFrame(values)
-        for col in ['MAF_by_col_str', 'HLA_freqs_str', 'AA_AF_by_col_str', 'COND_VARIANTS', 'SKIPPED_COND_VARIANTS']:
+        for col in ['COND_VARIANTS', 'SKIPPED_COND_VARIANTS']:
             if col in out:
                 out[col] = out[col].replace('', np.nan)
         results[name] = _clean_output(out)
