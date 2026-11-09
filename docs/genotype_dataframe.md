@@ -4,7 +4,7 @@
 DataFrame instead of an `HLAdata` object. Sample IIDs form the index and original
 variant IDs form the columns. Sample IDs remain strings, including leading zeros.
 
-PGEN file format is best option between the three as it keeps the most accurate fractional dosage between them. And bfile is the least preferred as it converts them into hard counts.
+The PGEN file format is the preferred option among the three, as it preserves fractional dosages with the highest precision. The BFILE format is the least preferred, as it converts dosages into hard genotype calls.
 
 For RAW input, the returned DataFrame column names have the final
 `_COUNTED_ALLELE` suffix removed: `rs123_A` becomes `rs123`, and
