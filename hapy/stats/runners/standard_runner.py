@@ -43,33 +43,25 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _retain_aa_skip_status(out):
-    """Retain explicit status and missing P-values even when every test skips."""
-    if 'SKIP_REASON' in out:
-        out = out.copy()
-        out['SKIPPED'] = out['SKIPPED'].fillna(False).astype(bool)
-        for col in ['LR_p', 'Uni_p', 'LRp_Unip']:
-            if col not in out:
-                out[col] = np.nan
+def _ensure_aa_output_info(out):
+    """Keep INFO and missing P-values available even when every test skips."""
+    if 'INFO' not in out:
+        out['INFO'] = ''
+    if out.INFO.eq('insufficient variation').any():
+        if "P-value" not in out:
+            out[ "P-value"] = np.nan
     return out
 
 
 def _report_aa_skips(tables):
-    frequency_skips, label_skips = set(), set()
+    variants = set()
     for table in tables:
-        if 'SKIP_REASON' in table:
-            frequency = table.SKIP_REASON.str.contains('insufficient variation', na=False)
-            labels = table.SKIP_REASON.str.contains('no supported single-residue labels', na=False)
-            frequency_skips.update(table.loc[frequency, 'VARIANT'])
-            label_skips.update(table.loc[labels, 'VARIANT'])
-    for variants, reason in [
-        (frequency_skips, 'insufficient variation remained after subsetting to analysis samples'),
-        (label_skips, 'no supported single-residue columns were available'),
-    ]:
-        if variants:
-            plural = 'position' if len(variants) == 1 else 'positions'
-            print(f'{len(variants)} AA {plural} skipped because {reason}. '
-                  'See SKIPPED and SKIP_REASON.', flush=True)
+        if 'INFO' in table:
+            variants.update(table.loc[table.INFO.eq('insufficient variation'), 'VARIANT'])
+    if variants:
+        plural = 'position' if len(variants) == 1 else 'positions'
+        print(f'{len(variants)} AA {plural} skipped because insufficient variation remained '
+              'after subsetting to analysis samples. See INFO.', flush=True)
 
 
 def _af_from_col(s: pd.Series) -> float:
@@ -144,14 +136,16 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     elif adapter.KIND == "AA":
         row.setdefault("AA_AF_by_col_str", np.nan)
 
-    row.setdefault("LR_p", np.nan)
-    row.setdefault("Anova_p", np.nan)
-    row.setdefault("multi_Coef", np.nan)
-    row.setdefault("Uni_p", np.nan)
-    row.setdefault("Uni_Coef", np.nan)
-    row.setdefault("Uni_StdErr", np.nan)
-    row.setdefault("CI_0.025", np.nan)
-    row.setdefault("CI_0.975", np.nan)
+    #row.setdefault("LR_p", np.nan)
+    #row.setdefault("Anova_p", np.nan)
+    row.setdefault("P-value", np.nan)
+    row.setdefault("TEST", np.nan)
+    #row.setdefault("multi_Coef", np.nan)
+    #row.setdefault("Uni_p", np.nan)
+    row.setdefault("Beta", np.nan)
+    row.setdefault("StdErr", np.nan)
+    row.setdefault("CI-lower", np.nan)
+    row.setdefault("CI-upper", np.nan)
 
     if qc["N_used"] == 0 or len(geno_cols) == 0:
         return row
@@ -231,7 +225,7 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
                 "geno_cols": geno_cols,
             }
             if not variant_filter(ctx):
-                return {"SKIPPED": True, **meta, "VARIANT": variant_id}
+                return {**meta, "VARIANT": variant_id, "INFO": "excluded by variant filter"}
 
         abt, qc = make_model_table(geno_df, yser, covdf_local)
 
@@ -353,17 +347,13 @@ def run_standard(
 
     out = pd.DataFrame(rows)
 
-    if adapter.KIND == "AA":
-        if "LR_p" in out.columns and "Uni_p" in out.columns:
-            out["LRp_Unip"] = out["LR_p"].combine_first(out["Uni_p"])
-
     for c in ("MAF_by_col_str", "HLA_freqs_str", "AA_AF_by_col_str", "COND_VARIANTS", "SKIPPED_COND_VARIANTS"):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
 
     out = _clean_output(out)
     if adapter.KIND == 'AA':
-        out = _retain_aa_skip_status(out)
+        out = _ensure_aa_output_info(out)
 
     if verbose:
         if adapter.KIND == 'AA':
@@ -487,7 +477,7 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
                 out[col] = out[col].replace('', np.nan)
         results[name] = _clean_output(out)
         if adapter.KIND == 'AA':
-            results[name] = _retain_aa_skip_status(results[name])
+            results[name] = _ensure_aa_output_info(results[name])
 
     if verbose:
         if adapter.KIND == 'AA':

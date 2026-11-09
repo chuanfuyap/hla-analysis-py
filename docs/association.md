@@ -103,9 +103,10 @@ groups these by position into output IDs such as `AA_DPB1_69_33048646`.
 | Column | Meaning |
 |---|---|
 | `VARIANT`, `GENE`, `AA_POS` | Position-level identifier, gene and amino acid sequence position. |
-| `LR_p`, `LR_stat`, `DoF` | Omnibus likelihood-ratio comparison for a position with multiple fitted genotype columns. |
-| `Uni_p`, `Uni_Coef`, `Uni_StdErr`, `CI_0.025`, `CI_0.975` | Single-column association result and coefficient uncertainty. Logistic coefficients are log-odds coefficients; their direction refers to the counted encoding. |
-| `LRp_Unip` | `LR_p` when available, otherwise `Uni_p`; a convenient plotting column, not a combination of tests. |
+| `P-value` | P-value of either omnibus test or univariate amino acid position test. |
+| `TEST` | **MULTI**: omnibus test performed on multi-allelic positions, **SINGLE**: bi-allelic positions, i.e. two amino acids, **OVR**: one vs rest for single amino acid test in multi-allelic positions. |
+| `LR-stat`, `DoF` | Omnibus likelihood-ratio comparison for a position with multiple fitted genotype columns. |
+| `Beta`, `StdErr`, `CI-lower`, `CI-upper` | Bi-allelic association effect estimate, standard error and 95% confidence interval. Logistic regression coefficients are on the log-odds scale (not odds ratios); their direction depends on the counted allele encoding. To obtain odds ratios and their 95% confidence intervals, apply np.exp() to Beta, CI-lower and CI-upper, respectively. |
 | `AA_AF`, `Ref_AA`, `Amino_Acids`, `AAcount` | Adapter annotations; biological interpretation depends on correct dosage orientation. |
 
 For a multi-column position, there is no single overall signed effect coefficient;

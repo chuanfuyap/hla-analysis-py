@@ -158,12 +158,5 @@ class AAAdapter:
             )
         }
 
-        if haplodf.shape[1] == 0:
-            meta['SKIPPED'] = True
-            unsupported_labels = (hladat.type == 'softcall' and len(aadf) > 1
-                                  and not any(len(str(marker).rsplit('_', 1)[-1]) == 1 for marker in aadf.index))
-            meta['SKIP_REASON'] = (
-                'No eligible AA genotype columns: no supported single-residue labels.' if unsupported_labels
-                else 'No eligible AA genotype columns: insufficient variation after subsetting to analysis samples.'
-            )
+        meta['INFO'] = 'insufficient variation' if haplodf.shape[1] == 0 else ''
         return haplodf, meta

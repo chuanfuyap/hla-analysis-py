@@ -45,11 +45,11 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
 
     ci = m.conf_int().loc[geno_term]
     return {
-        "Uni_p": float(m.pvalues[geno_term]),
-        "Uni_Coef": float(m.params[geno_term]),
-        "Uni_StdErr": float(m.bse[geno_term]),
-        "CI_0.025": float(ci[0]),
-        "CI_0.975": float(ci[1]),
+        "P-value": float(m.pvalues[geno_term]),
+        "Beta": float(m.params[geno_term]),
+        "StdErr": float(m.bse[geno_term]),
+        "CI-lower": float(ci[0]),
+        "CI-upper": float(ci[1]),
     }
 
 
@@ -84,8 +84,8 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     # present = [c for c in geno_cols if c in alt.params.index]
 
     out = {
-        "LR_p": float(lrp),
-        "LR_stat": float(lrstat),
+        "P-value": float(lrp),
+        "LR-stat": float(lrstat),
         "DoF" : int(dof)
         #"Anova_p": float(fp),
         #"n_geno": len(present),
