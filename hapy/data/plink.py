@@ -10,7 +10,7 @@ import pgenlib
 from .HLAdat import HLAdata
 from .io import GenomicsFileReader, _add_variant_info
 
-__all__ = ["read_plink"]
+__all__ = ["read_plink", "read_genotype"]
 
 
 def _read_pvar(path, rowskip=None):
@@ -219,6 +219,138 @@ def read_plink(
         filter_R2=filter_R2, R2_minimum=R2_minimum, simpleQC=simpleQC,
         load_types=load_types, dosage_allele=dosage_allele,
     ).read()
+
+
+def read_genotype(
+    fileloc,
+    *,
+    format: Literal["pgen", "bfile", "raw"] = "pgen",
+    pvarfileloc=None,
+    psamfileloc=None,
+    variants=None,
+    dosage_allele: Literal["alt", "ref", "counted"] | None = None,
+) -> pd.DataFrame:
+    """Read PLINK files into a sample-by-variant genotype DataFrame.
+
+    Parameters
+    ----------
+    fileloc : str or pathlib.Path
+        Fileset prefix or genotype filename (.pgen, .bed or .raw).
+    format : {"pgen", "bfile", "raw"}, default "pgen"
+        PGEN/PVAR/PSAM, BED/BIM/FAM, or additive PLINK RAW input.
+    pvarfileloc : str or pathlib.Path, optional
+        Explicit PVAR path for PGEN or RAW. RAW automatically uses a matching
+        PVAR if present, but does not require one. BED uses BIM instead.
+    psamfileloc : str or pathlib.Path, optional
+        Explicit PSAM path for PGEN. Otherwise uses <prefix>.psam.
+    variants : iterable of str or str, optional
+        Exact variant IDs to load, in requested order. Unknown or repeated IDs
+        raise ValueError. Defaults to all variants; [] returns samples only.
+        Selection precedes binary decoding / RAW numeric-column loading.
+    dosage_allele : {"alt", "ref", "counted"}, optional
+        Defaults to ALT for binary input and the header's counted allele for
+        RAW. REF/ALT requests for RAW require PVAR. "counted" is RAW-only.
+        BED defines A1 as ALT and A2 as REF. No HLA reorientation is applied.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Float64 dosages with string sample IIDs as rows, original variant IDs
+        as columns, and missing calls as NaN. Binary inputs preserve metadata
+        order; RAW preserves file order. RAW column names have the final
+        _COUNTED_ALLELE suffix removed (e.g. rs123_A becomes rs123); everything
+        before the final underscore is preserved. PGEN/bfile IDs are unchanged.
+        Explicit variants sets column order.
+        Use as block_b_df with b_kind="DF" in interaction analysis.
+
+    Notes
+    -----
+    Reads PLINK formats only; VCF is not currently supported. Selected variants
+    with metadata must be biallelic with known, distinct REF and ALT alleles.
+    RAW without PVAR retains counted dosages without inferring other alleles.
+    IIDs must be unique across families. Values use the diploid 0–2 dosage
+    scale; fractional values are preserved. No R2, frequency or missingness
+    filtering is applied. Select variants to limit dense-matrix memory use.
+
+    Examples
+    --------
+    >>> partners = read_genotype("chr7", format="pgen", variants=["rs1", "rs2"])
+    >>> partners = read_genotype("chr7.raw", format="raw")
+    """
+    if format not in {"pgen", "bfile", "raw"}:
+        raise ValueError("format must be 'pgen', 'bfile', or 'raw'")
+    if dosage_allele is None:
+        dosage_allele = "counted" if format == "raw" else "alt"
+    if dosage_allele not in {"alt", "ref", "counted"}:
+        raise ValueError("dosage_allele must be 'alt', 'ref', or 'counted'")
+    if dosage_allele == "counted" and format != "raw":
+        raise ValueError("dosage_allele='counted' is only available for RAW input")
+    if psamfileloc is not None and format != "pgen":
+        raise ValueError("psamfileloc is only available for PGEN input")
+    suffix = {"pgen": ".pgen", "bfile": ".bed", "raw": ".raw"}[format]
+    source = str(Path(fileloc))
+    prefix = source[:-len(suffix)] if source.endswith(suffix) else source
+    path = Path(prefix + suffix)
+    if not path.is_file():
+        raise FileNotFoundError(path)
+    inferred_raw = False
+    if format == "bfile":
+        if pvarfileloc is not None:
+            raise ValueError("bfile uses BIM metadata, not PVAR")
+        metadata = pd.read_csv(prefix + ".bim", sep=r"\s+", header=None,
+                               names=["CHROM", "ID", "CM", "POS", "ALT", "REF"],
+                               dtype=str, keep_default_na=False).set_index("ID")
+        fam = pd.read_csv(prefix + ".fam", sep=r"\s+", header=None,
+                          dtype=str, keep_default_na=False)
+        if fam.shape[1] != 6:
+            raise ValueError("FAM must contain six columns")
+        samples = _validate_ids(fam[1], "Sample IIDs")
+    else:
+        pvar_path = Path(pvarfileloc) if pvarfileloc is not None else Path(prefix + ".pvar")
+        inferred_raw = format == "raw" and pvarfileloc is None and not pvar_path.is_file()
+        if inferred_raw:
+            if dosage_allele != "counted":
+                raise ValueError("RAW REF/ALT orientation requires a PVAR file")
+            metadata = _raw_variants(path)
+        else:
+            metadata = _read_pvar(pvar_path)
+        if format == "pgen":
+            samples = _validate_ids(
+                _read_psam(psamfileloc if psamfileloc is not None else prefix + ".psam")["IID"],
+                "Sample IIDs",
+            )
+    _validate_ids(metadata.index, "Variant IDs")
+    if format == "raw":
+        _, _, raw_ids, counted = _raw_header(path)
+        _validate_ids(raw_ids, "RAW variant IDs")
+        missing = raw_ids.difference(metadata.index)
+        if len(missing):
+            raise ValueError(f"RAW variant IDs not found in PVAR: {missing.tolist()}")
+        available = metadata.loc[raw_ids]
+    else:
+        available = metadata
+    if variants is None:
+        selected = available
+    else:
+        ids = pd.Index([variants] if isinstance(variants, str) else list(variants))
+        if len(ids):
+            ids = _validate_ids(ids, "Selected variant IDs")
+        missing = ids.difference(available.index)
+        if len(missing):
+            raise ValueError(f"Variant IDs not found in input: {missing.tolist()}")
+        selected = available.loc[ids]
+    if not inferred_raw:
+        for column in ("REF", "ALT"):
+            if (selected[column].isin(["", ".", "0"]).any()
+                    or selected[column].str.contains(",", regex=False).any()):
+                raise ValueError("Only biallelic variants with known REF and ALT are supported")
+        if selected["REF"].eq(selected["ALT"]).any():
+            raise ValueError("REF and ALT must be different")
+    effect = (counted.reindex(selected.index) if dosage_allele == "counted"
+              else selected["ALT" if dosage_allele == "alt" else "REF"])
+    if format == "raw":
+        return _read_raw(path, metadata, effect).reindex(selected.index).T
+    return _read_binary(path, metadata, samples, effect).T
 
 
 class PLINKFileReader(GenomicsFileReader):

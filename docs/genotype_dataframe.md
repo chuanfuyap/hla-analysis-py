@@ -1,33 +1,57 @@
-# Reading PGEN data for interaction analysis
+# Reading PLINK genotype data for interaction analysis
 
-`hp.read_pgen()` reads a PLINK `.pgen`/`.pvar`/`.psam` fileset into a pandas
+`hp.read_genotype()` reads PLINK PGEN, BED/BIM/FAM (bfile), or RAW input into a pandas
 DataFrame instead of an `HLAdata` object. Sample IIDs form the index and original
 variant IDs form the columns. Sample IDs remain strings, including leading zeros.
+
+PGEN file format is best option between the three as it keeps the most accurate fractional dosage between them. And bfile is the least preferred as it converts them into hard counts.
+
+For RAW input, the returned DataFrame column names have the final
+`_COUNTED_ALLELE` suffix removed: `rs123_A` becomes `rs123`, and
+`chr7_37338247_T_C_C` becomes `chr7_37338247_T_C`. Everything before the final
+underscore is preserved. Use these returned variant IDs in `variants=[...]`.
+PGEN and bfile column names use the IDs in PVAR and BIM unchanged.
 
 ```python
 import hapy as hp
 
-# Accepts a fileset prefix or the .pgen filename.
-partners = hp.read_pgen("test_data/chr7.pgen")
+# Accepts a fileset prefix or the genotype filename.
+partners = hp.read_genotype("test_data/chr7.pgen", format="pgen")
+partners = hp.read_genotype("test_data/chr7.bed", format="bfile")
+partners = hp.read_genotype("test_data/chr7.raw", format="raw")
 
 # Read only selected variants, in this order.
-partners = hp.read_pgen("test_data/chr7", variants=["rs1", "rs2"])
+partners = hp.read_genotype("test_data/chr7", variants=["rs1", "rs2"])
 ```
 
-Values count the PVAR ALT allele by default. Fractional imputed dosages are
-preserved and missing genotypes are `NaN`. Use `dosage_allele="ref"` to count
-REF instead. No HLA presence/absence reorientation, marker grouping, R2 filtering
-or frequency filtering is performed. Selected variants must be biallelic with
-known, distinct REF and ALT alleles; duplicate variant IDs or sample IIDs are
+PGEN and bfile count ALT by default (BIM A1 for bfile). RAW preserves the
+counted allele named by each column's final suffix by default, even when PVAR
+is available. This means differently oriented RAW and binary files may return
+complementary dosages by default. To align them, use `dosage_allele="alt"` or
+`"ref"` explicitly; RAW requires PVAR for these requests. `"counted"` is RAW-only.
+No HLA presence/absence reorientation is performed.
+
+Fractional dosages are preserved and missing genotypes are `NaN`. PGEN requires
+PVAR and PSAM; bfile requires BIM and FAM. RAW uses a matching PVAR if it exists,
+but works without one. Selected variants with metadata must be biallelic with
+known, distinct REF and ALT alleles. Duplicate variant IDs or sample IIDs are
 rejected. Dosages use PLINK's diploid 0–2 scale.
 
 | Parameter | Type | Description |
 |---|---|---|
-| `fileloc` | `str` or `Path` | Fileset prefix or `.pgen` filename. |
-| `pvarfileloc` | `str` or `Path`, optional | PVAR path; defaults to `<prefix>.pvar`. |
-| `psamfileloc` | `str` or `Path`, optional | PSAM path; defaults to `<prefix>.psam`. |
-| `variants` | iterable of strings or string, optional | Exact variant IDs to read. Defaults to all variants; unknown or repeated IDs raise an error. An empty list returns samples with no genotype columns. |
-| `dosage_allele` | `"alt"` or `"ref"` | Counted allele; defaults to `"alt"`. |
+| `fileloc` | `str` or `Path` | Fileset prefix or `.pgen`, `.bed`, or `.raw` filename. |
+| `format` | `"pgen"`, `"bfile"`, or `"raw"` | Input format; defaults to `"pgen"`. Specify it for RAW and bfile. |
+| `pvarfileloc` | `str` or `Path`, optional | PVAR path for PGEN or RAW; defaults to `<prefix>.pvar`. RAW permits no PVAR. Not applicable to bfile. |
+| `psamfileloc` | `str` or `Path`, optional | PGEN-only PSAM path; defaults to `<prefix>.psam`. |
+| `variants` | iterable of strings or string, optional | Exact variant IDs to read, in requested order. Defaults to all variants; unknown or repeated IDs raise an error. An empty list returns samples with no genotype columns. |
+| `dosage_allele` | `"alt"`, `"ref"`, `"counted"`, or `None` | `None` (default) counts ALT for binary files and the header's counted allele for RAW. |
+
+Variant selection happens **before binary dosage decoding**. For RAW it restricts
+the genotype columns loaded numerically, while the text file is still scanned.
+RAW selection uses variant IDs without their final `_COUNTED_ALLELE` suffix.
+For example, a RAW column `chr7_37338247_T_C_C` is selected with
+`variants=["chr7_37338247_T_C"]`. No genomic regions, patterns or automatic
+frequency filters are applied by `variants`.
 
 ## Using the DataFrame in interactions
 
@@ -35,7 +59,7 @@ With an existing `hladat`, phenotype Series `phenotype` indexed by IID, and
 optional IID-indexed covariate DataFrame `covar`:
 
 ```python
-partners = hp.read_pgen("test_data/chr7", variants=["rs1", "rs2"])
+partners = hp.read_genotype("test_data/chr7", variants=["rs1", "rs2"])
 
 config = hp.stats.InteractionConfig(
     model_type="logit",
@@ -60,3 +84,8 @@ are handled by the existing interaction analysis complete-case processing.
 The returned DataFrame is dense. For large filesets, select the partner variants
 before decoding to limit memory use. Apply imputation quality and other desired
 QC filters upstream; this reader performs no automatic QC filtering.
+
+This function currently supports PLINK formats only. VCF support can be added
+later through the same `read_genotype()` API; it is not implemented yet.
+The initially introduced `read_pgen()` function has been renamed to
+`read_genotype()`; update calls to use the new name.
