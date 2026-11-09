@@ -50,6 +50,7 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
         "StdErr": float(m.bse[geno_term]),
         "CI-lower": float(ci[0]),
         "CI-upper": float(ci[1]),
+        "TEST": "SINGLE",
     }
 
 
@@ -86,7 +87,8 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     out = {
         "P-value": float(lrp),
         "LR-stat": float(lrstat),
-        "DoF" : int(dof)
+        "DoF" : int(dof),
+        "TEST": "MULTI",
         #"Anova_p": float(fp),
         #"n_geno": len(present),
         #"geno_terms": ",".join(present) if present else None,
