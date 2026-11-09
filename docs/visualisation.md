@@ -49,7 +49,7 @@ For example, add one of these configurations to either plotting function:
 # Numeric sequence positions within HLA-DRB1 (the default axis).
 x_axis="amino_acid", genes="DRB1"
 
-![HLA-DRB1 association plotted by amino acid sequence position](aminoacid_gene.png)
+![HLA-DRB1 association plotted by amino acid sequence position](images/aminoacid_gene.png)
 
 
 # Physical genomic spacing across HLA genes.
@@ -58,7 +58,7 @@ x_axis="genomic"
 # Even spacing across HLA positions, with gene/position tick labels.
 x_axis="equally_spaced"
 
-![HLA association plotted using equally spaced positions](manhattan_equallyspaced.png)
+![HLA association plotted using equally spaced positions](images/manhattan_equallyspaced.png)
 ```
 
 `equally_spaced` prints an INFO note on each call explaining that distances are
@@ -84,7 +84,7 @@ fig, ax = hp.vis.plot_aa_association(
     significance_threshold=5e-8, save_path="association.png",
 )
 
-![HLA interaction plotted using equally spaced positions](interaction_equallyspaced.png)
+![HLA interaction plotted using equally spaced positions](images/interaction_equallyspaced.png)
 
 ```
 
