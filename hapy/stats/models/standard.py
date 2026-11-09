@@ -12,6 +12,7 @@ Covariates are optional. Strings are encoded as categoricals using C(col) in for
 """
 
 from __future__ import annotations
+import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
@@ -26,6 +27,24 @@ def _fit(formula: str, abt: pd.DataFrame, model_type: str):
     return smf.ols(formula=formula, data=abt).fit()
 
 
+def _fit_info(model, model_type: str) -> str:
+    """Describe unusable fitted models; an empty string means checks passed.
+
+    Check both OLS and GLM estimates. GLM additionally exposes convergence.
+    These checks do not capture or suppress numerical warnings during fitting.
+    """
+    issues = []
+    if model_type == "logit" and not model.converged:
+        issues.append("not converged")
+    if not np.isfinite(model.params).all():
+        issues.append("non-finite coefficients")
+    if not np.isfinite(model.bse).all():
+        issues.append("non-finite standard errors")
+    if not np.isfinite(model.llf):
+        issues.append("non-finite log-likelihood")
+    return "; ".join(issues)
+
+
 def _cov_terms(abt: pd.DataFrame, covar_cols: list[str]) -> list[str]:
     """Convert covariate columns to formula terms with C() wrapping where needed."""
     return [categorical_term(c, abt[c].dtype) for c in covar_cols]
@@ -33,7 +52,9 @@ def _cov_terms(abt: pd.DataFrame, covar_cols: list[str]) -> list[str]:
 
 def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], model_type: str) -> dict:
     """
-    Fit a univariate association model and return p/coef/CI.
+    Fit a univariate association model and return p/coef/CI and INFO.
+
+    If convergence or finiteness checks fail, return TEST and INFO only.
 
     Model:
       Y ~ covars + geno_col
@@ -43,6 +64,10 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
     f = "Y ~ " + " + ".join(terms) if terms else "Y ~ 1"
     m = _fit(f, abt, model_type)
 
+    info = _fit_info(m, model_type)
+    if info:
+        return {"INFO": info, "TEST": "SINGLE"}
+
     ci = m.conf_int().loc[geno_term]
     return {
         "P-value": float(m.pvalues[geno_term]),
@@ -51,6 +76,8 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
         "CI-lower": float(ci[0]),
         "CI-upper": float(ci[1]),
         "TEST": "SINGLE",
+        "INFO": "",
+        "Statistic": float(m.tvalues[geno_term]),
     }
 
 
@@ -65,7 +92,8 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
 
     Returns
     -------
-    dict with LR_p, Anova_p, multi_Coef
+    dict with P-value, LR-stat, DoF, TEST and INFO. If either fit fails
+    convergence or finiteness checks, return TEST and INFO only.
     """
     cov_terms = _cov_terms(abt, covar_cols)
     geno_terms = [categorical_term(c, abt[c].dtype) for c in geno_cols]
@@ -78,6 +106,14 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     alt = _fit(altf, abt, model_type)
     nul = _fit(nullf, abt, model_type)
 
+    issues = []
+    for label, model in (("null model", nul), ("full model", alt)):
+        info = _fit_info(model, model_type)
+        if info:
+            issues.append(f"{label}: {info}")
+    if issues:
+        return {"INFO": "; ".join(issues), "TEST": "MULTI"}
+
     lrstat, lrp, dof = lrtest(nul, alt)
     #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 
@@ -86,13 +122,21 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
 
     out = {
         "P-value": float(lrp),
-        "LR-stat": float(lrstat),
+        "Statistic": float(lrstat),
         "DoF" : int(dof),
         "TEST": "MULTI",
+        "INFO": "",
         #"Anova_p": float(fp),
         #"n_geno": len(present),
         #"geno_terms": ",".join(present) if present else None,
     }
+
+    out["Beta"] = ";".join(
+        f"{term.split('_')[1]}={alt.params[term]:.12g}" for term in geno_terms
+    )
+    out["StdErr"] = ";".join(
+        f"{term.split('_')[1]}={alt.bse[term]:.12g}" for term in geno_terms
+    )
 
     # if present:
     #     beta = alt.params.loc[present]

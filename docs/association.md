@@ -105,14 +105,10 @@ groups these by position into output IDs such as `AA_DPB1_69_33048646`.
 | `VARIANT`, `GENE`, `AA_POS` | Position-level identifier, gene and amino acid sequence position. |
 | `P-value` | P-value of either omnibus test or univariate amino acid position test. |
 | `TEST` | **MULTI**: omnibus test performed on multi-allelic positions, **SINGLE**: bi-allelic positions, i.e. two amino acids, **OVR**: one vs rest for single amino acid test in multi-allelic positions. |
-| `LR-stat`, `DoF` | Omnibus likelihood-ratio comparison for a position with multiple fitted genotype columns. |
-| `Beta`, `StdErr`, `CI-lower`, `CI-upper` | Bi-allelic association effect estimate, standard error and 95% confidence interval. Logistic regression coefficients are on the log-odds scale (not odds ratios); their direction depends on the counted allele encoding. To obtain odds ratios and their 95% confidence intervals, apply np.exp() to Beta, CI-lower and CI-upper, respectively. |
+| `Statistic`, `DoF` | Test statistic and associated degrees of freedom. MULTI tests report the likelihood-ratio statistic; SINGLE tests report the t-statistic for linear regression or the Wald z-statistic for logistic regression. |
+| `Beta`, `StdErr` | Association effect estimate and standard error. MULTI tests report residue-specific estimates relative to the reference amino acid, formatted as `A=value;G=value`. Logistic regression coefficients are on the log-odds scale (not odds ratios); apply `np.exp()` to each coefficient to obtain odds ratios. |
+| `CI-lower`, `CI-upper` | Lower and upper limits of the 95% confidence interval, reported for SINGLE tests only. Their direction depends on the counted allele encoding. For logistic regression, apply `np.exp()` to these limits to obtain the 95% confidence interval for the odds ratio. |
 | `AA_AF`, `Ref_AA`, `Amino_Acids`, `AAcount` | Adapter annotations; biological interpretation depends on correct dosage orientation. |
-
-For a multi-column position, there is no single overall signed effect coefficient;
-use its omnibus P-value. Missing `Uni_p` or `LR_p` is expected when the other test
-applies. The example does not choose the smaller of those P-values. Preserve full
-precision when saving coefficients and standard errors for later meta-analysis.
 
 ## Conditional association
 

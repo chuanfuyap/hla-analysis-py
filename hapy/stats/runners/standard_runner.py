@@ -39,7 +39,12 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df = df.drop(columns=["N_COND_VARIANTS"])
     if "N_dropped_other" in df.columns and df.N_dropped_other.nunique() == 1 and df.N_dropped_other.unique()[0] == 0:
         df = df.drop(columns=["N_dropped_other"])
-    df = df.dropna(axis=1, how="all")
+    # Preserve missing statistics when fitted models fail diagnostic checks.
+    keep = []
+    if "INFO" in df and df["INFO"].fillna("").ne("").any():
+        keep = [c for c in ("P-value", "Beta", "StdErr", "CI-lower", "CI-upper")
+                if c in df]
+    df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
     return df
 
 
@@ -126,6 +131,7 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     row["N_COND_VARIANTS"] = len(used_conditions)
     row["SKIPPED_COND_VARIANTS"] = ";".join(skipped_conditions) if skipped_conditions else np.nan
     row.update(qc)
+    row.setdefault("INFO", "")
 
     if adapter.KIND == "SNP":
         row.setdefault("MAF", np.nan)
@@ -136,12 +142,9 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     elif adapter.KIND == "AA":
         row.setdefault("AA_AF_by_col_str", np.nan)
 
-    #row.setdefault("LR_p", np.nan)
-    #row.setdefault("Anova_p", np.nan)
     row.setdefault("P-value", np.nan)
     row.setdefault("TEST", np.nan)
-    #row.setdefault("multi_Coef", np.nan)
-    #row.setdefault("Uni_p", np.nan)
+    row.setdefault("Statistic", np.nan)
     row.setdefault("Beta", np.nan)
     row.setdefault("StdErr", np.nan)
     row.setdefault("CI-lower", np.nan)
@@ -470,8 +473,6 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
     results = {}
     for name, values in rows.items():
         out = pd.DataFrame(values)
-        if adapter.KIND == 'AA' and 'LR_p' in out and 'Uni_p' in out:
-            out['LRp_Unip'] = out['LR_p'].combine_first(out['Uni_p'])
         for col in ['MAF_by_col_str', 'HLA_freqs_str', 'AA_AF_by_col_str', 'COND_VARIANTS', 'SKIPPED_COND_VARIANTS']:
             if col in out:
                 out[col] = out[col].replace('', np.nan)
