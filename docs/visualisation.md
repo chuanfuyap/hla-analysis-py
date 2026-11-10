@@ -19,11 +19,12 @@ rows for a position raise an error. Obtain position-level tests from the amino a
 analysis; this module never combines residue P-values. Different genomic coordinates
 are preserved even if their gene and sequence position are the same.
 
-Select `pval_col="LR_p"` (the default when neither significance column is supplied),
-or `log10p_col="META_log10P"`. The latter means **positive −log₁₀(P)**, not log₁₀(P).
-For standard AA results with both single-column and omnibus tests, explicitly use
-`pval_col="LRp_Unip"` to plot the runner's coalesced test column. No test columns are
-silently mixed by the plotting functions. Interaction results use `I_p`.
+For current standard AA and AA omnibus interaction results, explicitly select
+`pval_col="P-value"` and `variant_col="VARIANT"`. Pairwise interaction results use
+`I_p` and represent individual encoded-column tests rather than AA block omnibus
+tests. Alternatively, supply `log10p_col="META_log10P"`, meaning **positive
+−log₁₀(P)**, not log₁₀(P). No test columns are silently mixed by the plotting
+functions.
 
 Raw P-values must satisfy `0 < P <= 1`. Strings or Decimal values such as
 `"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small

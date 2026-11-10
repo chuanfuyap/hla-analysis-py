@@ -14,7 +14,7 @@ This module provides two interaction testing helpers used by the interaction run
    - Fits a model with main effects for anchor + all block columns, and compares:
        null: Y ~ covars + anchor + block_cols
         alt: Y ~ covars + anchor + block_cols + (anchor:block_cols)
-   - Returns omnibus p-values (LR_p, Anova_p), and optionally some coefficient summaries.
+   - Returns P-value, Statistic, DoF and INFO for the omnibus interaction test.
 
 Notes on categorical variables
 ------------------------------
@@ -43,7 +43,7 @@ from .common import lrtest, anova, categorical_term, _fit_info
 
 def _failed_result(info: str, *, omnibus: bool = False, term=None) -> dict:
     """Retain missing statistics and a reason when an interaction fit is unusable."""
-    columns = ("LR_p", "LR_stat", "DoF") if omnibus else (
+    columns = ("P-value", "Statistic", "DoF") if omnibus else (
         "A_p", "A_coef", "A_StdErr", "B_p", "B_coef", "B_StdErr",
         "I_p", "I_coef", "I_StdErr", "I_CI_0.025", "I_CI_0.975",
     )
@@ -242,14 +242,9 @@ def fit_block_omnibus_interaction(
 
     Returns
     -------
-    dict with keys
-        - LR_p: likelihood ratio test p-value comparing null vs alt
-        - Anova_p: ANOVA-style p-value comparing null vs alt
-        - n_I: number of interaction coefficients actually present in the fitted model
-        - I_terms: comma-separated list of present interaction coefficient names
-        - beta_<term>: coefficient for each present interaction term
-        - cov_<t1>__<t2>: covariance elements between present interaction terms
-          (can be many columns; intended for debugging/advanced downstream usage)
+    dict
+        P-value, Statistic, DoF and INFO. Failed checks return missing
+        statistics and a reason; successful fits have INFO set to NaN.
     """
     cov_terms = _terms(abt, baseline_covars)
     anchor_t = _term(abt, anchor_col)
@@ -287,8 +282,8 @@ def fit_block_omnibus_interaction(
             present.append(name)
 
     out: dict = {
-        "LR_p": float(lrp),
-        "LR_stat": float(lrstat),
+        "P-value": float(lrp),
+        "Statistic": float(lrstat),
         "DoF" : int(dof),
         "INFO": np.nan,
     #    "Anova_p": float(fp),

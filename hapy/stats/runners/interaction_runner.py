@@ -70,13 +70,27 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df["INFO"] = np.nan
     keep = {"INFO"}
     if df["INFO"].fillna("").ne("").any():
-        keep.update(("LR_p", "LR_stat", "DoF", "A_p", "A_coef", "A_StdErr",
+        keep.update(("P-value", "Statistic", "LR_p", "DoF", "A_p", "A_coef", "A_StdErr",
                      "B_p", "B_coef", "B_StdErr", "I_p", "I_coef", "I_StdErr",
                      "I_CI_0.025", "I_CI_0.975"))
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
     df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
 
     return df
+
+
+def _order_omnibus_output(out: pd.DataFrame) -> pd.DataFrame:
+    """Order the already named AA omnibus output columns."""
+    first = [
+        "VARIANT", "GENE", "AA_POS", "Amino_Acids", "Ref_AA", "AAcount", "AA_AF",
+        "Anchor_col", "Anchor_mean", "Anchor_proportion", "Anchor_AF",
+        "P-value", "Statistic", "DoF",
+    ]
+    last = ["N_used", "N_case", "N_control", "INFO"]
+    first = [c for c in first if c in out.columns]
+    last = [c for c in last if c in out.columns]
+    middle = [c for c in out.columns if c not in first + last]
+    return out[first + middle + last]
 
 
 def _normalize_condition_on(condition_on_a) -> list[str]:
@@ -164,17 +178,13 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
         # Add metadata describing this interaction test
         row.update(
             {
-                "A_kind": a_kind,
-                "B_kind": b_kind,
-                "AA_block_side": "A",      # AA block came from side A
-                "AA_variant": a_id,        # identifier for AA block variant
-                "Anchor_variant": b_id,    # identifier for anchor variant
-                "Anchor_col": anchor_col,  # actual anchor column tested
+                **{k: v for k, v in a_meta.items()
+                   if k not in {"AAcount", "VARIANT", "INFO"}},
+                "VARIANT": a_id,
+                "Anchor_col": anchor_col,
                 ("Anchor_mean" if b_kind == "COV" else "Anchor_AF"): np.nan,
-                # Prefix metadata from the AA block side
-                **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-                # Prefix metadata from the anchor side
-                **{f"Anchor_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+                **{f"Anchor_{k}": v for k, v in b_meta.items()
+                   if k not in {"AAcount", "VARIANT"}},
             }
         )
 
@@ -216,18 +226,13 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
     # Add metadata describing this interaction test
     row.update(
         {
-            "A_kind": a_kind,
-            "B_kind": b_kind,
-            "AA_block_side": "B",      # AA block came from side B
-            "AA_variant": b_id,        # identifier for AA block variant
-            "Anchor_variant": a_id,    # identifier for anchor variant
-            "Anchor_col": anchor_col,  # actual anchor column tested
-            "A_AF": np.nan,
+            **{k: v for k, v in b_meta.items()
+               if k not in {"AAcount", "VARIANT", "INFO"}},
+            "VARIANT": b_id,
+            "Anchor_col": anchor_col,
             "Anchor_AF": np.nan,
-            # Prefix metadata from anchor side
-            **{f"Anchor_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-            # Prefix metadata from AA block side
-            **{f"AA_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+            **{f"Anchor_{k}": v for k, v in a_meta.items()
+               if k not in {"AAcount", "VARIANT"}},
         }
     )
 
@@ -656,12 +661,8 @@ def run_interaction(
     for c in ("I_block_coefs",):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
-    if "LR_p" in out.columns:
-        out = out.sort_values("LR_p")
+    if "P-value" in out.columns:
+        out = out.sort_values("P-value")
 
     out = _clean_output(out)
-    drop_cols = [c for c in ["Anchor_variant", "AA_variant", "Anchor_VARIANT"] if c in out.columns]
-    if drop_cols:
-        out = out.drop(columns=drop_cols)
-
-    return out
+    return _order_omnibus_output(out)
