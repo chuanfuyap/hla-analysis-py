@@ -398,13 +398,17 @@ def survival(
         One row per variant with:
         - QC: N_dropped_na, N_used, N_event, N_censored
         - frequency summaries computed on final modelling rows
-        - survival stats: p, HR, CI_0.025, CI_0.975
-        - omnibus LR_p for multi-column blocks (e.g., AA positions) where applicable
+        - survival stats: P-value, HR, StdErr, CI-lower, CI-upper
+        - P-value is the omnibus LR test for multi-column genotype blocks
+        - INFO is last: NaN when checks pass, otherwise a fit/skip reason
 
     Notes
     -----
     lifelines does not support statsmodels formula encoding; categorical covariates are one-hot encoded
     before fitting.
+    Returned estimates and log-likelihoods are checked for finite values. Expected
+    numerical fitting failures are reported in INFO; omnibus reasons identify the
+    null or full model. Lifelines warnings are not captured as convergence flags.
     """
     if kind not in _KIND_MAP:
         raise ValueError(f"Unknown kind={kind}. Must be one of {sorted(_KIND_MAP.keys())}")

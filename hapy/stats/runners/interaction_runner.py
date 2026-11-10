@@ -50,6 +50,7 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
                      "B_p", "B_coef", "B_StdErr", "I_p", "I_coef", "I_StdErr",
                      "I_CI_0.025", "I_CI_0.975"))
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
+    df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
 
     return df
 
@@ -639,6 +640,5 @@ def run_interaction(
     drop_cols = [c for c in ["Anchor_variant", "AA_variant", "Anchor_VARIANT"] if c in out.columns]
     if drop_cols:
         out = out.drop(columns=drop_cols)
-
 
     return out

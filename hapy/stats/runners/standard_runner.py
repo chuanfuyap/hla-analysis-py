@@ -40,11 +40,13 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     if "N_dropped_other" in df.columns and df.N_dropped_other.nunique() == 1 and df.N_dropped_other.unique()[0] == 0:
         df = df.drop(columns=["N_dropped_other"])
     # Preserve missing statistics when fitted models fail diagnostic checks.
-    keep = []
+    keep = ["INFO"]
     if "INFO" in df and df["INFO"].fillna("").ne("").any():
-        keep = [c for c in ("P-value", "Beta", "StdErr", "CI-lower", "CI-upper")
-                if c in df]
+        keep.extend(c for c in ("P-value", "Beta", "StdErr", "CI-lower", "CI-upper")
+                    if c in df)
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
+    if "INFO" in df:
+        df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
     return df
 
 
@@ -55,7 +57,7 @@ def _ensure_aa_output_info(out):
     if out.INFO.eq('insufficient variation').any():
         if "P-value" not in out:
             out[ "P-value"] = np.nan
-    return out
+    return out[[c for c in out.columns if c != "INFO"] + ["INFO"]]
 
 
 def _report_aa_skips(tables):

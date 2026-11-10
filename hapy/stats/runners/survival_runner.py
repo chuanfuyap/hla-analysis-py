@@ -18,19 +18,18 @@ import pandas as pd
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_covar, build_survival_table
-from ..models.survival import fit_cox_univariate, fit_cox_model, lrtest_cox
+from ..models.survival import fit_cox_univariate, fit_cox_omnibus, _empty_cox_result
 
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
+    # Preserve the established Cox output fields and keep INFO last.
     df = dataframe.drop(columns=["N_total"], errors="ignore")
-    if df.N_missing_Y.nunique()==1 and df.N_missing_Y.unique()[0]==0:
-        df = df.drop(columns = ['N_missing_Y'])
-    if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
-        df = df.drop(columns = ['N_dropped_other'])
-
-    df = df.dropna(axis=1, how="all")
-
+    if not df.empty and "INFO" not in df:
+        df["INFO"] = np.nan
+    if "INFO" in df:
+        df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
     return df
+
 
 def _af_from_col(s: pd.Series) -> float:
     """Allele frequency estimate from dosage/copy number."""
@@ -58,7 +57,8 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
     if variant_filter is not None:
         ctx = {"analysis": "survival", "kind": adapter.KIND, "variant_id": variant_id, "meta": meta, "geno_cols": geno_cols}
         if not variant_filter(ctx):
-            return {"SKIPPED": True, **meta, "VARIANT": variant_id}
+            return {"SKIPPED": True, **meta, "VARIANT": variant_id,
+                    **_empty_cox_result("excluded by variant filter")}
 
     cox_df, qc = build_survival_table(geno_df, event_time, cov=covdf, dynamic_covar=dynamic_covar)
 
@@ -66,8 +66,14 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
     row["VARIANT"] = variant_id
     row.update(qc)
 
-    if qc["N_used"] == 0 or len(geno_cols) == 0:
-        row.update({"P-value": np.nan, "HR": np.nan,"StdErr":np.nan, "CI-lower": np.nan, "CI-upper": np.nan})
+    if len(geno_cols) == 0:
+        row.update(_empty_cox_result("insufficient variation"))
+        return row
+    if qc["N_used"] == 0:
+        row.update(_empty_cox_result("no complete-case samples"))
+        return row
+    if qc["N_event"] == 0:
+        row.update(_empty_cox_result("no observed events"))
         return row
 
     # Count each person once, regardless of how many intervals they contribute.
@@ -85,18 +91,8 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
         row.update(fit_cox_univariate(cox_df, geno_cols[0]))  # fills p/HR/CI
         return row
 
-    # Multi-column: omnibus LR only
-    abt = cox_df.copy()
-
-    alt = fit_cox_model(abt)
-    alt_ll = float(alt.log_likelihood_)
-
-    null_cols = [c for c in abt.columns if c not in set(geno_cols)]
-    nul = fit_cox_model(abt[null_cols])
-    null_ll = float(nul.log_likelihood_)
-
-    row["P-value"] = lrtest_cox(alt_ll, null_ll, dof=len(geno_cols))
-    row.update({"HR": np.nan,"StdErr":np.nan, "CI-lower": np.nan, "CI-upper": np.nan})
+    # Multi-column: check both Cox models before the omnibus LR test.
+    row.update(fit_cox_omnibus(cox_df, geno_cols))
     return row
 
 
@@ -171,7 +167,7 @@ def run_survival(
     if prog is not None:
         prog.close()
 
-    out = pd.DataFrame(rows).drop(columns=["N_total"], errors="ignore")
+    out = _clean_output(pd.DataFrame(rows))
 
     if verbose:
         print(f"survival[{kind}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)

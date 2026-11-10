@@ -210,6 +210,21 @@ For survival analysis, the effect columns have a different interpretation:
 |---|---|
 | `HR`, `StdErr`, `CI-lower`, `CI-upper` | Hazard ratio, standard error of the log-hazard coefficient and lower and upper limits of the 95% confidence interval for the hazard ratio. Reported for SINGLE tests only. HR > 1 indicates increased hazard and HR < 1 indicates decreased hazard per unit increase in genotype dosage. |
 
+Survival results also keep `INFO` as the last column. It is missing when the
+explicit checks pass. Reasons include `not converged` for a lifelines
+`ConvergenceError`, `singular matrix`, `numerical fitting error`, non-finite
+coefficients/standard errors/log-likelihood, and `feature not estimated`.
+Multi-column Cox tests identify the `null model` or `full model` in fit messages.
+No usable genotype columns, no complete-case samples or no observed events are
+reported before fitting. Affected rows retain their sample counts and missing
+estimates, allowing other variants to continue.
+
+Lifelines does not provide the same public convergence flag as the standard
+logistic models. Warning-only convergence concerns remain visible as warnings
+and are not copied into `INFO`; a missing `INFO` means the explicit checks
+passed, not that every convergence concern has been ruled out. Invalid input or
+unexpected programming errors can still stop execution.
+
 ## Conditional association
 
 Adjust for one or more positions from the same AA block:
