@@ -38,7 +38,20 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from .common import lrtest, anova, categorical_term
+from .common import lrtest, anova, categorical_term, _fit_info
+
+
+def _failed_result(info: str, *, omnibus: bool = False, term=None) -> dict:
+    """Retain missing statistics and a reason when an interaction fit is unusable."""
+    columns = ("LR_p", "LR_stat", "DoF") if omnibus else (
+        "A_p", "A_coef", "A_StdErr", "B_p", "B_coef", "B_StdErr",
+        "I_p", "I_coef", "I_StdErr", "I_CI_0.025", "I_CI_0.975",
+    )
+    result = dict.fromkeys(columns, np.nan)
+    result["INFO"] = info
+    if term is not None:
+        result["I_term"] = term
+    return result
 
 
 def _fit(formula: str, abt: pd.DataFrame, model_type: str):
@@ -88,6 +101,9 @@ def fit_pairwise_interaction(
 ) -> dict:
     """
     Fit a pairwise interaction model and return interaction statistics.
+
+    Failed convergence/finiteness checks return missing statistics and an INFO
+    reason. Successful fits have INFO set to NaN.
 
     Model
     -----
@@ -147,6 +163,14 @@ def fit_pairwise_interaction(
     alt = _fit(altf, abt, model_type)
 
     iterm = f"{a_t}:{b_t}"
+    info = _fit_info(alt, model_type)
+    if info:
+        return _failed_result(info, term=iterm)
+    if compute_lrt:
+        nul = _fit(basef, abt, model_type)
+        info = _fit_info(nul, model_type)
+        if info:
+            return _failed_result(f"null model: {info}", term=iterm)
 
     # NOTE: This assumes the interaction term appears as a single coefficient.
     # For categorical expansions, statsmodels may create multiple interaction params.
@@ -160,6 +184,7 @@ def fit_pairwise_interaction(
         "B_p": float(alt.pvalues[b_t]),
         "B_coef":float(alt.params[b_t]),
         "B_StdErr": float(alt.bse[b_t]),
+        "INFO": np.nan,
         "I_term": iterm,
         "I_p": float(alt.pvalues[iterm]),
         "I_coef": float(alt.params[iterm]),
@@ -169,8 +194,7 @@ def fit_pairwise_interaction(
     }
 
     if compute_lrt:
-        nul = _fit(basef, abt, model_type)
-        _lrstat, lrp = lrtest(nul, alt)
+        _lrstat, lrp, _dof = lrtest(nul, alt)
         _fstat, fp = anova(nul, alt, abt["Y"], model_type)
         out["LR_p"] = float(lrp)
         out["Anova_p"] = float(fp)
@@ -190,6 +214,9 @@ def fit_block_omnibus_interaction(
 ) -> dict:
     """
     Fit an omnibus interaction model: anchor × block.
+
+    Both null and full models must pass convergence/finiteness checks. Failed
+    checks return missing statistics and an INFO reason identifying the model.
 
     This is used when one "variant" is represented by multiple columns (a block),
     e.g., AA position k-1 encoding. Instead of reporting many individual interaction
@@ -237,6 +264,14 @@ def fit_block_omnibus_interaction(
     alt = _fit(altf, abt, model_type)
     nul = _fit(nullf, abt, model_type)
 
+    issues = []
+    for label, model in (("null model", nul), ("full model", alt)):
+        info = _fit_info(model, model_type)
+        if info:
+            issues.append(f"{label}: {info}")
+    if issues:
+        return _failed_result("; ".join(issues), omnibus=True)
+
     lrstat, lrp, dof = lrtest(nul, alt)
     #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 
@@ -254,7 +289,8 @@ def fit_block_omnibus_interaction(
     out: dict = {
         "LR_p": float(lrp),
         "LR_stat": float(lrstat),
-        "DoF" : int(dof)
+        "DoF" : int(dof),
+        "INFO": np.nan,
     #    "Anova_p": float(fp),
     #    "n_I": len(present),
     #    "I_terms": ",".join(present) if present else None,

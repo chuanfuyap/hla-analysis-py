@@ -158,5 +158,5 @@ class AAAdapter:
             )
         }
 
-        meta['INFO'] = 'insufficient variation' if haplodf.shape[1] == 0 else ''
+        meta['INFO'] = 'insufficient variation' if haplodf.shape[1] == 0 else np.nan
         return haplodf, meta

@@ -25,7 +25,7 @@ import pandas as pd
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_y, prepare_covar, make_model_table, sample_index
-from ..models.interaction import fit_pairwise_interaction, fit_block_omnibus_interaction
+from ..models.interaction import fit_pairwise_interaction, fit_block_omnibus_interaction, _failed_result
 
 
 def _af_safe(series: pd.Series) -> float:
@@ -42,7 +42,14 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
         df = df.drop(columns = ['N_dropped_other'])
 
-    df = df.dropna(axis=1, how="all")
+    if "INFO" not in df:
+        df["INFO"] = np.nan
+    keep = {"INFO"}
+    if df["INFO"].fillna("").ne("").any():
+        keep.update(("LR_p", "LR_stat", "DoF", "A_p", "A_coef", "A_StdErr",
+                     "B_p", "B_coef", "B_StdErr", "I_p", "I_coef", "I_StdErr",
+                     "I_CI_0.025", "I_CI_0.975"))
+    df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
 
     return df
 
@@ -149,7 +156,7 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
 
         # If no rows remain after merging / NA filtering, return empty stats
         if abt.shape[0] == 0:
-            row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
+            row.update(_failed_result("no complete-case samples", omnibus=True))
             return row
         row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
@@ -204,7 +211,7 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
 
     # If analysis table is empty, return row with NA stats
     if abt.shape[0] == 0:
-        row.update({"LR_p": np.nan, "Anova_p": np.nan, "I_terms": np.nan, "I_block_coefs": np.nan})
+        row.update(_failed_result("no complete-case samples", omnibus=True))
         return row
     row["Anchor_AF"] = _af_safe(abt[anchor_col])
 
@@ -249,23 +256,7 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
     )
 
     if abt.shape[0] == 0:
-        row.update(
-            {
-                "A_p": np.nan,
-                "A_coef": np.nan,
-                "A_StdErr": np.nan,
-                "B_p": np.nan,
-                "B_coef": np.nan,
-                "B_StdErr": np.nan,
-                "I_p": np.nan,
-                "I_coef": np.nan,
-                "I_StdErr": np.nan,
-                "I_CI_0.025": np.nan,
-                "I_CI_0.975": np.nan,
-                "LR_p": np.nan,
-                "Anova_p": np.nan,
-            }
-        )
+        row.update(_failed_result("no complete-case samples"))
         return row
 
     row["A_AF"] = _af_safe(abt[ac])
@@ -641,8 +632,6 @@ def run_interaction(
     for c in ("I_block_coefs",):
         if c in out.columns:
             out[c] = out[c].replace("", np.nan)
-    out = out.dropna(axis=1, how="all")
-
     if "LR_p" in out.columns:
         out = out.sort_values("LR_p")
 

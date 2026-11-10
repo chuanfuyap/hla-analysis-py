@@ -329,6 +329,36 @@ only; it does not automatically remove tasks where the same ID occurs on B.
 The current interaction runner omits conditioning blocks with no eligible
 columns, so a requested empty block does not contribute adjustment terms.
 
+## Fit diagnostics: `INFO`
+
+`INFO` is missing for tests that pass the fit checks. It is kept in the output
+so results can be filtered consistently. Interaction models use the same
+explicit checks as standard association analysis:
+
+| `INFO` message | Meaning |
+|---|---|
+| `not converged` | Logistic model fitting did not converge. |
+| `non-finite coefficients` | One or more fitted coefficients are NaN or infinite. |
+| `non-finite standard errors` | One or more coefficient standard errors are NaN or infinite. |
+| `non-finite log-likelihood` | The fitted model log-likelihood is NaN or infinite. |
+| `no complete-case samples` | No samples remain after excluding missing model inputs, so the model was not fitted. |
+
+Omnibus diagnostics identify the `null model` or `full model`, for example
+`full model: not converged`. Multiple problems are separated by semicolons.
+Pairwise tests check the full interaction model; omnibus tests check both models
+before calculating the likelihood-ratio test.
+
+When a check fails, the row retains its identifiers, QC counts and `INFO`, while
+fit statistics are missing. A nonzero `N_used` does not mean the fit succeeded.
+These checks do not capture or suppress warning messages, and unexpected fitting
+exceptions can still stop execution. Empty genotype blocks that were not
+scheduled do not acquire an output row through these fit checks.
+
+```python
+successful = results.loc[results["INFO"].isna()]
+problems = results.loc[results["INFO"].notna()]
+```
+
 ## Saving and plotting
 
 `N_used` reports the final number of complete-case samples for each test.

@@ -17,7 +17,7 @@ import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
-from .common import lrtest, anova, categorical_term
+from .common import lrtest, anova, categorical_term, _fit_info
 
 
 def _fit(formula: str, abt: pd.DataFrame, model_type: str):
@@ -26,23 +26,6 @@ def _fit(formula: str, abt: pd.DataFrame, model_type: str):
         return smf.glm(formula=formula, data=abt, family=sm.families.Binomial()).fit(disp=0)
     return smf.ols(formula=formula, data=abt).fit()
 
-
-def _fit_info(model, model_type: str) -> str:
-    """Describe unusable fitted models; an empty string means checks passed.
-
-    Check both OLS and GLM estimates. GLM additionally exposes convergence.
-    These checks do not capture or suppress numerical warnings during fitting.
-    """
-    issues = []
-    if model_type == "logit" and not model.converged:
-        issues.append("not converged")
-    if not np.isfinite(model.params).all():
-        issues.append("non-finite coefficients")
-    if not np.isfinite(model.bse).all():
-        issues.append("non-finite standard errors")
-    if not np.isfinite(model.llf):
-        issues.append("non-finite log-likelihood")
-    return "; ".join(issues)
 
 
 def _cov_terms(abt: pd.DataFrame, covar_cols: list[str]) -> list[str]:
