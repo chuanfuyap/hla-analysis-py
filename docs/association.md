@@ -182,10 +182,11 @@ jointly, rather than choosing the smallest residue-specific P-value.
 
 ## Reading the results
 
+`N_used` reports the final number of complete-case samples for each test.
+
 The return value is a pandas DataFrame with position IDs such as
-`AA_DPB1_69_33048646` in `VARIANT`. Parallel execution can change row order; use
-`VARIANT` to identify or join results. Entirely missing columns and some
-zero-valued housekeeping columns may be omitted.
+`AA_DPB1_69_33048646` in `VARIANT`. Use `VARIANT` to identify or join 
+results. Entirely missing columns and some zero-valued housekeeping columns may be omitted.
 
 | Column | Meaning |
 |---|---|

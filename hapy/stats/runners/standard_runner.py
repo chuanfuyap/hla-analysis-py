@@ -32,7 +32,7 @@ from ..models.standard import fit_univariate, fit_omnibus
 
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
-    df = dataframe
+    df = dataframe.drop(columns=["N_total"], errors="ignore")
     if "N_missing_Y" in df.columns and df.N_missing_Y.nunique() == 1 and df.N_missing_Y.unique()[0] == 0:
         df = df.drop(columns=["N_missing_Y"])
     if "N_COND_VARIANTS" in df.columns and df.N_COND_VARIANTS.nunique() == 1 and df.N_COND_VARIANTS.unique()[0] == 0:

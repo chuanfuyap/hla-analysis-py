@@ -331,6 +331,8 @@ columns, so a requested empty block does not contribute adjustment terms.
 
 ## Saving and plotting
 
+`N_used` reports the final number of complete-case samples for each test.
+
 ```python
 results.to_csv("aa_genotype_interactions.txt", sep="\t", index=False)
 ranked = results.dropna(subset=["LR_p"]).sort_values("LR_p")

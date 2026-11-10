@@ -82,7 +82,7 @@ def analyse(
     pandas.DataFrame
         One row per tested variant (position/allele depending on kind), including:
         - variant meta fields (GENE/POS/etc when available)
-        - QC fields: N_total, N_missing_Y, N_dropped_other, N_used, N_case, N_control
+        - QC fields: N_missing_Y, N_dropped_other, N_used, N_case, N_control
         - frequency fields: MAF / HLA_AF / AA_AF
         - model fields: Beta/StdErr/CI/Statistic
 
@@ -396,7 +396,7 @@ def survival(
     -------
     pandas.DataFrame
         One row per variant with:
-        - QC: N_total, N_dropped_na, N_used, N_event, N_censored
+        - QC: N_dropped_na, N_used, N_event, N_censored
         - frequency summaries computed on final modelling rows
         - survival stats: p, HR, CI_0.025, CI_0.975
         - omnibus LR_p for multi-column blocks (e.g., AA positions) where applicable
