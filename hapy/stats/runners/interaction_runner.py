@@ -66,15 +66,16 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     if df.N_dropped_other.nunique()==1 and df.N_dropped_other.unique()[0]==0:
         df = df.drop(columns = ['N_dropped_other'])
 
-    if "INFO" not in df:
-        df["INFO"] = np.nan
-    keep = {"INFO"}
-    if df["INFO"].fillna("").ne("").any():
+    if "INFO" in df:
+        df["INFO"] = df["INFO"].replace("", np.nan)
+    keep = set()
+    if "INFO" in df and df["INFO"].notna().any():
         keep.update(("P-value", "Statistic", "LR_p", "DoF", "A_p", "A_coef", "A_StdErr",
                      "B_p", "B_coef", "B_StdErr", "I_p", "I_coef", "I_StdErr",
                      "I_CI_0.025", "I_CI_0.975"))
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
-    df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
+    if "INFO" in df:
+        df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
 
     return df
 
