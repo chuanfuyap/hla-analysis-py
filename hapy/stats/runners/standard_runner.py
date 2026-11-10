@@ -31,6 +31,19 @@ from ..models.standard import fit_univariate, fit_omnibus
 
 
 
+def _order_output(dataframe: pd.DataFrame) -> pd.DataFrame:
+    """Put annotations/tests first and modelling sample counts/INFO last."""
+    first = [
+        "VARIANT", "GENE", "AA_POS", "Amino_Acids", "Ref_AA", "AAcount", "MAF","HLA_AF","AA_AF",
+        "TEST", "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF",
+    ]
+    last = ["N_used", "N_case", "N_control", "INFO"]
+    first = [c for c in first if c in dataframe.columns]
+    last = [c for c in last if c in dataframe.columns]
+    middle = [c for c in dataframe.columns if c not in first + last]
+    return dataframe[first + middle + last]
+
+
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     df = dataframe.drop(columns=["N_total"], errors="ignore")
     if "N_missing_Y" in df.columns and df.N_missing_Y.nunique() == 1 and df.N_missing_Y.unique()[0] == 0:
@@ -45,9 +58,7 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         keep.extend(c for c in ("P-value", "Beta", "StdErr", "CI-lower", "CI-upper")
                     if c in df)
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
-    if "INFO" in df:
-        df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
-    return df
+    return _order_output(df)
 
 
 def _ensure_aa_output_info(out):
@@ -57,7 +68,7 @@ def _ensure_aa_output_info(out):
     if out.INFO.eq('insufficient variation').any():
         if "P-value" not in out:
             out[ "P-value"] = np.nan
-    return out[[c for c in out.columns if c != "INFO"] + ["INFO"]]
+    return _order_output(out)
 
 
 def _report_aa_skips(tables):

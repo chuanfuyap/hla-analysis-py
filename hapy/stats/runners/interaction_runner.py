@@ -4,7 +4,7 @@ Interaction runner with progress reporting.
 Pairwise:
 - prints total task count (A_cols × B_cols over variant pairs, after optional pair_filter)
 - updates progress as results complete
-- includes A_AF/B_AF (numeric only) computed on final modelling rows
+- reports genotype AFs or COV predictor means on final modelling rows
 
 Omnibus:
 - AA-only block omnibus rule enforced
@@ -32,6 +32,30 @@ def _af_safe(series: pd.Series) -> float:
     if not pd.api.types.is_numeric_dtype(series):
         return np.nan
     return float(series.mean() / 2.0)
+
+def _predictor_summary(series: pd.Series, kind: str, prefix: str) -> dict:
+    """Report genotype AF, numeric covariate mean or a binary proportion.
+
+    DF partners use the genotype-dosage convention; COV marks covariates.
+    Binary categoricals report the second level; other categorical sizes are NaN.
+    """
+    if kind != "COV":
+        return {f"{prefix}_AF": _af_safe(series)}
+    if (not pd.api.types.is_numeric_dtype(series)
+            or pd.api.types.is_bool_dtype(series)):
+        proportion = np.nan
+        levels = pd.Categorical(series).categories
+        n = int(series.notna().sum())
+        if len(levels) == 2 and n:
+            proportion = float(series.eq(levels[1]).sum() / n)
+        return {f"{prefix}_proportion": proportion}
+    value = np.nan
+    if pd.api.types.is_numeric_dtype(series):
+        mean = series.mean()
+        if pd.notna(mean):
+            value = float(mean)
+    return {f"{prefix}_mean": value}
+
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     df = dataframe.drop(columns=["N_total"], errors="ignore")
@@ -146,8 +170,7 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
                 "AA_variant": a_id,        # identifier for AA block variant
                 "Anchor_variant": b_id,    # identifier for anchor variant
                 "Anchor_col": anchor_col,  # actual anchor column tested
-                "B_AF": np.nan,
-                "Anchor_AF": np.nan,
+                ("Anchor_mean" if b_kind == "COV" else "Anchor_AF"): np.nan,
                 # Prefix metadata from the AA block side
                 **{f"AA_{k}": v for k, v in a_meta.items() if k != "AAcount"},
                 # Prefix metadata from the anchor side
@@ -159,7 +182,7 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
         if abt.shape[0] == 0:
             row.update(_failed_result("no complete-case samples", omnibus=True))
             return row
-        row["Anchor_AF"] = _af_safe(abt[anchor_col])
+        row.update(_predictor_summary(abt[anchor_col], b_kind, "Anchor"))
 
         # Fit omnibus interaction model:
         # anchor_col x all block_cols jointly
@@ -214,7 +237,7 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
     if abt.shape[0] == 0:
         row.update(_failed_result("no complete-case samples", omnibus=True))
         return row
-    row["Anchor_AF"] = _af_safe(abt[anchor_col])
+    row.update(_predictor_summary(abt[anchor_col], a_kind, "Anchor"))
 
 
     # Fit omnibus interaction model:
@@ -250,7 +273,7 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
             "B_variant": b_id,
             "B_col": bc,
             "A_AF": np.nan,
-            "B_AF": np.nan,
+            ("B_mean" if b_kind == "COV" else "B_AF"): np.nan,
             **{f"A_{k}": v for k, v in a_meta.items() if k != "AAcount"},
             **{f"B_{k}": v for k, v in b_meta.items() if k != "AAcount"},
         }
@@ -261,7 +284,7 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
         return row
 
     row["A_AF"] = _af_safe(abt[ac])
-    row["B_AF"] = _af_safe(abt[bc])
+    row.update(_predictor_summary(abt[bc], b_kind, "B"))
 
     row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
     return row
