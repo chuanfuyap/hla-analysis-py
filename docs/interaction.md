@@ -187,15 +187,90 @@ preparation, before model selection. For logistic regression, otherwise supply
 0/1 values and represent missing outcomes as `NaN` rather than numeric sentinel
 values such as -9. Use `model_type="linear"` for continuous phenotypes.
 
-Numeric covariates enter as continuous predictors. String/object and categorical
-covariates are represented using categorical model terms. Convert numeric codes
-such as SEX or treatment categories to `category` when they should be treated
-as categories. Column names containing spaces or punctuation are quoted for
-formula construction. An intercept is included automatically.
+Numeric baseline covariates enter as continuous predictors; string/object and
+categorical baseline covariates use categorical model terms. Column names
+containing spaces or punctuation are quoted for formula construction. An
+intercept is included automatically.
 
-For each position, samples missing the phenotype, a fitted genotype column, a
-covariate or a conditioning genotype are excluded. This can leave different
-sample counts across tested positions. `hapy` does not impute these missing values.
+For each interaction, samples missing phenotype, a fitted genotype column,
+a model covariate or a conditioning genotype are excluded. Sample counts can
+differ between interaction tests. `hapy` does not impute these missing values.
+
+## Interacting with a covariate: AA positions × SEX
+
+Use `b_kind="COV"` to test AA positions against columns already in your covariate
+table. `cov_block_cols` selects the interacting columns; all other covariates
+are baseline adjustment terms by default. There is no need to create a separate
+partner DataFrame.
+
+With SEX in the IID-indexed `covar` table and an IID-indexed phenotype Series
+`pheno[2]`:
+
+```python
+config = hp.stats.InteractionConfig(
+    model_type="logit",
+    mode="one_vs_block_omnibus",
+    n_jobs=12,
+    backend="thread",
+)
+results = hp.stats.interaction(
+    hladat,
+    config,
+    a_kind="AA",
+    b_kind="COV",
+    covar=covar,
+    y=pheno[2],
+    cov_block_cols=["SEX"], # must be passed as a list
+    verbose=True,
+    use_progress_bar=False,
+    print_every=500,
+)
+```
+
+For each AA position, the models are:
+
+```text
+Null: Y ~ other covariates + SEX + AA block
+Full: Y ~ other covariates + SEX + AA block + SEX:AA_column_1 + ...
+```
+
+### Coding the interacting covariate
+
+For a binary SEX predictor, numeric 0/1 coding is convenient. Binary categorical
+SEX is also supported in the omnibus mode shown above. No assumption about
+which code represents which sex is made by the interaction function. 
+
+For `mode="pairwise"`, use numeric interacting predictors, such as a 0/1 binary
+indicator. Categorical predictors expand into formula coefficients that the
+current pairwise extraction does not handle generally. Baseline covariates can
+still be categorical in either mode.
+
+### Several interacting covariates
+
+```python
+results = hp.stats.interaction(
+    hladat, config, a_kind="AA", b_kind="COV",
+    covar=covar, y=ra[2],
+    cov_block_cols=["SEX", "exposure"],
+)
+```
+
+This schedules a separate anchor-by-AA-block test for each listed covariate.
+It does not jointly test SEX and exposure as one interaction block. All selected
+columns are removed from the baseline table, so SEX tests do not automatically
+adjust for exposure, or vice versa. Other non-selected covariates remain
+baseline adjustment terms by default.
+
+Use `baseline_covar_cols` to name the desired baseline terms explicitly, for
+example `["age", "PC1", "PC2"]`. Do not add the tested anchor to that list: its
+main effect is already included. To avoid unrelated missing-value exclusions,
+pass a covariate table containing the selected interacting predictors and the
+adjustment columns you need.
+
+Conditioning with `condition_on_a` works with covariate interactions too; those
+genotype columns enter as additional baseline adjustment terms. Covariate B
+blocks are identified as `COV_BLOCK` in filter contexts; select a particular
+exposure using `anchor_col` in omnibus mode or `b_col` in pairwise mode.
 
 ## Selecting interaction tests
 
