@@ -278,6 +278,14 @@ class GenomicsFileReader(abc.ABC):
         del df
         hladat = self._prepare_data(hladat)
         hladat = self.postprocess(hladat)
+
+        for load_type in self.load_types:
+            if hasattr(hladat, load_type):
+                obj = getattr(hladat, load_type)
+                if obj.data.shape[0]==0:
+                    print(f"NOTE: No {load_type} data was loaded. Are we sure this data file contains data with  {load_type}_ prefix?", flush=True)
+                    print()
+
         print(f"Elapsed time for processing: {time.time() - start2:.4f} seconds", flush=True)
         print()
         print(f"TOTAL TIME TAKEN: {time.time() - start:.4f} seconds", flush=True)

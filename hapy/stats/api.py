@@ -245,7 +245,7 @@ def interaction(
         Tests each feature column from A against each feature column from B:
           Base: Y ~ baseline_covars + A + B
           Alt:  Base + A:B
-        Returns signed interaction coefficient I_coef.
+        Returns the signed interaction coefficient in Beta, with P-value and StdErr.
 
     - mode="one_vs_block_omnibus":
         Tests an omnibus interaction between an anchor feature and an AA multi-column block:
@@ -286,7 +286,7 @@ def interaction(
         Columns are treated as block B features (each column interacts with each A column in pairwise mode).
     condition_on_a:
         Optional A-side same-kind variant id or list of variant ids to include as conditioning covariates.
-        Any tested task with A_variant in this set is not modeled.
+        Any tested task whose A-side variant is in this set is not modeled.
     verbose, use_progress_bar, print_every:
         Progress reporting controls.
 

@@ -80,9 +80,9 @@ For each selected A column and B column, fit:
 Full model: Y ~ baseline covariates + A + B + A:B
 ```
 
-The reported `I_p` tests the interaction coefficient in the full model. For
+The reported `P-value` tests the interaction coefficient in the full model. For
 logistic regression this is a two-sided Wald z-test; for linear regression it
-is a two-sided t-test. `I_coef` is the signed interaction coefficient.
+is a two-sided t-test. `Beta` is the signed interaction coefficient.
 
 ```python
 config = hp.stats.InteractionConfig(model_type="logit", mode="pairwise")
@@ -331,17 +331,31 @@ columns, so a requested empty block does not contribute adjustment terms.
 
 
 
+## Pairwise output columns
+
+Pairwise model results use the same effect/test names as standard association
+output. The model creates these fields directly:
+
+| Column | Meaning |
+|---|---|
+| `P-value`, `Statistic` | Interaction coefficient test P-value and t-statistic (linear) or Wald z-statistic (logistic). |
+| `Beta`, `StdErr`, `CI-lower`, `CI-upper` | Interaction coefficient, standard error and 95% confidence interval. Logistic estimates are on the log-odds scale. |
+| `Variant_p`, `Variant_Beta` | Focal variant main-effect P-value and coefficient from the full interaction model. |
+| `Anchor_p`, `Anchor_Beta` | Anchor* main-effect P-value and coefficient from the full interaction model. |
+
+Anchor refers to the component (either genetic or environment) interacting with HLA variant being analysed. 
+
 ## Saving and plotting
 
 `N_used` reports the final number of complete-case samples for each test.
 
 ```python
 results.to_csv("aa_genotype_interactions.txt", sep="\t", index=False)
-ranked = results.dropna(subset=["LR_p"]).sort_values("LR_p")
+ranked = results.dropna(subset=["P-value"]).sort_values("P-value")
 ```
 
-For pairwise results, sort using `I_p` instead. For AA position-level interaction
+For AA position-level interaction
 plots, see [Visualisation](visualisation.md). Supply the omnibus AA ID column
-(`AA_VARIANT`) and the appropriate partner identifiers or genomic coordinates.
+(`VARIANT`) and the appropriate partner identifiers or genomic coordinates.
 External partner IDs such as `rs1` do not themselves provide genomic positions;
 supply a position column when an ID cannot be parsed.

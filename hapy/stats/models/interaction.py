@@ -41,16 +41,14 @@ import statsmodels.formula.api as smf
 from .common import lrtest, anova, categorical_term, _fit_info
 
 
-def _failed_result(info: str, *, omnibus: bool = False, term=None) -> dict:
+def _failed_result(info: str, *, omnibus: bool = False) -> dict:
     """Retain missing statistics and a reason when an interaction fit is unusable."""
     columns = ("P-value", "Statistic", "DoF") if omnibus else (
-        "A_p", "A_coef", "A_StdErr", "B_p", "B_coef", "B_StdErr",
-        "I_p", "I_coef", "I_StdErr", "I_CI_0.025", "I_CI_0.975",
+        "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper",
+        "Variant_p", "Variant_Beta", "Anchor_p", "Anchor_Beta",
     )
     result = dict.fromkeys(columns, np.nan)
     result["INFO"] = info
-    if term is not None:
-        result["I_term"] = term
     return result
 
 
@@ -138,19 +136,12 @@ def fit_pairwise_interaction(
 
     Returns
     -------
-    dict with keys
-        Always:
-        - I_term: string term used for the interaction (e.g., "A:B" or "C(A):B")
-        - I_p: Wald p-value for the interaction coefficient in the full model
-        - I_coef: interaction coefficient estimate
-        - I_CI_0.025 / I_CI_0.975: confidence interval bounds for I_coef
-
-        Additionally if compute_lrt=True:
-        - LR_p: likelihood ratio test p-value comparing base vs full
-        - Anova_p: ANOVA-style p-value comparing base vs full
-
-        If compute_lrt=False:
-        - LR_p, Anova_p are returned as NaN (keeps schema stable; can be dropped later).
+    dict
+        P-value, Statistic, Beta, StdErr, CI-lower and CI-upper describe the
+        interaction coefficient. Variant_p/Variant_Beta and Anchor_p/Anchor_Beta
+        are main-effect estimates from the full model. INFO is NaN when fit
+        checks pass; otherwise estimates are missing and INFO gives a reason.
+        compute_lrt=True additionally returns LR_p and Anova_p comparisons.
     """
     cov_terms = _terms(abt, baseline_covars)
     a_t = _term(abt, a_col)
@@ -165,12 +156,12 @@ def fit_pairwise_interaction(
     iterm = f"{a_t}:{b_t}"
     info = _fit_info(alt, model_type)
     if info:
-        return _failed_result(info, term=iterm)
+        return _failed_result(info)
     if compute_lrt:
         nul = _fit(basef, abt, model_type)
         info = _fit_info(nul, model_type)
         if info:
-            return _failed_result(f"null model: {info}", term=iterm)
+            return _failed_result(f"null model: {info}")
 
     # NOTE: This assumes the interaction term appears as a single coefficient.
     # For categorical expansions, statsmodels may create multiple interaction params.
@@ -178,19 +169,17 @@ def fit_pairwise_interaction(
     ci = alt.conf_int().loc[iterm]
 
     out = {
-        "A_p":  float(alt.pvalues[a_t]),
-        "A_coef": float(alt.params[a_t]),
-        "A_StdErr": float(alt.bse[a_t]), 
-        "B_p": float(alt.pvalues[b_t]),
-        "B_coef":float(alt.params[b_t]),
-        "B_StdErr": float(alt.bse[b_t]),
+        "P-value": float(alt.pvalues[iterm]),
+        "Statistic": float(alt.tvalues[iterm]),
+        "Beta": float(alt.params[iterm]),
+        "StdErr": float(alt.bse[iterm]),
+        "CI-lower": float(ci.iloc[0]),
+        "CI-upper": float(ci.iloc[1]),
+        "Variant_p": float(alt.pvalues[a_t]),
+        "Variant_Beta": float(alt.params[a_t]),
+        "Anchor_p": float(alt.pvalues[b_t]),
+        "Anchor_Beta": float(alt.params[b_t]),
         "INFO": np.nan,
-        "I_term": iterm,
-        "I_p": float(alt.pvalues[iterm]),
-        "I_coef": float(alt.params[iterm]),
-        "I_StdErr" : float(alt.bse[iterm]),
-        "I_CI_0.025": float(ci[0]),
-        "I_CI_0.975": float(ci[1]),
     }
 
     if compute_lrt:
@@ -198,9 +187,6 @@ def fit_pairwise_interaction(
         _fstat, fp = anova(nul, alt, abt["Y"], model_type)
         out["LR_p"] = float(lrp)
         out["Anova_p"] = float(fp)
-    else:
-        out["LR_p"] = np.nan
-        out["Anova_p"] = np.nan
 
     return out
 

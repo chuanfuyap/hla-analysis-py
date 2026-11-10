@@ -70,9 +70,9 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
         df["INFO"] = df["INFO"].replace("", np.nan)
     keep = set()
     if "INFO" in df and df["INFO"].notna().any():
-        keep.update(("P-value", "Statistic", "LR_p", "DoF", "A_p", "A_coef", "A_StdErr",
-                     "B_p", "B_coef", "B_StdErr", "I_p", "I_coef", "I_StdErr",
-                     "I_CI_0.025", "I_CI_0.975"))
+        keep.update(("P-value", "Statistic", "LR_p", "DoF", "Beta", "StdErr",
+                     "CI-lower", "CI-upper", "Variant_p", "Variant_Beta",
+                     "Anchor_p", "Anchor_Beta"))
     df = df.drop(columns=[c for c in df if c not in keep and df[c].isna().all()])
     if "INFO" in df:
         df = df[[c for c in df.columns if c != "INFO"] + ["INFO"]]
@@ -80,12 +80,13 @@ def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _order_omnibus_output(out: pd.DataFrame) -> pd.DataFrame:
-    """Order the already named AA omnibus output columns."""
+def _order_interaction_output(out: pd.DataFrame) -> pd.DataFrame:
+    """Order the already named interaction output columns."""
     first = [
-        "VARIANT", "GENE", "AA_POS", "Amino_Acids", "Ref_AA", "AAcount", "AA_AF",
-        "Anchor_col", "Anchor_mean", "Anchor_proportion", "Anchor_AF",
-        "P-value", "Statistic", "DoF",
+        "VARIANT", "GENE", "AA_POS", "Amino_Acids", "Ref_AA", "AAcount","HLA_AF","MAF", "AA_AF",
+        "Variant_col", "Anchor_col", "Anchor_mean", "Anchor_proportion", "Anchor_AF",
+        "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF",
+        "Variant_p", "Variant_Beta", "Anchor_p", "Anchor_Beta",
     ]
     last = ["N_used", "N_case", "N_control", "INFO"]
     first = [c for c in first if c in out.columns]
@@ -272,16 +273,12 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
     row.update(qc)
     row.update(
         {
-            "A_kind": a_kind,
-            "B_kind": b_kind,
-            "A_variant": a_id,
-            "A_col": ac,
-            "B_variant": b_id,
-            "B_col": bc,
-            "A_AF": np.nan,
-            ("B_mean" if b_kind == "COV" else "B_AF"): np.nan,
-            **{f"A_{k}": v for k, v in a_meta.items() if k != "AAcount"},
-            **{f"B_{k}": v for k, v in b_meta.items() if k != "AAcount"},
+            **{k: v for k, v in a_meta.items() if k not in {"VARIANT", "INFO"}},
+            "VARIANT": a_id,
+            **({"Variant_col": ac} if len(a_df.columns) > 1 else {}),
+            "Anchor_col": bc,
+            **{f"Anchor_{k}": v for k, v in b_meta.items()
+               if k not in {"AAcount", "VARIANT"}},
         }
     )
 
@@ -289,8 +286,12 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
         row.update(_failed_result("no complete-case samples"))
         return row
 
-    row["A_AF"] = _af_safe(abt[ac])
-    row.update(_predictor_summary(abt[bc], b_kind, "B"))
+    if a_kind == "HLA":
+        row["HLA_AF"] = _af_safe(abt[ac])
+    elif a_kind == "SNP":
+        frequency = _af_safe(abt[ac])
+        row["MAF"] = min(frequency, 1.0 - frequency)
+    row.update(_predictor_summary(abt[bc], b_kind, "Anchor"))
 
     row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
     return row
@@ -494,14 +495,11 @@ def run_interaction(
 
         out = pd.DataFrame(rows)
         out = _clean_output(out)
-        drop_cols = [c for c in ["A_col", "B_variant", "A_VARIANT", "B_VARIANT"] if c in out.columns]
-        if drop_cols:
-            out = out.drop(columns=drop_cols)
 
         if verbose:
             print(f"interaction[pairwise] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
 
-        return out
+        return _order_interaction_output(out)
 
     # =============
     # Omnibus mode
@@ -666,4 +664,4 @@ def run_interaction(
         out = out.sort_values("P-value")
 
     out = _clean_output(out)
-    return _order_omnibus_output(out)
+    return _order_interaction_output(out)

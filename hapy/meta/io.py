@@ -44,7 +44,20 @@ def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame | 
 def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, None]:
     """HLA and SNP results: IVW only, derive SE from CI."""
     if interaction:
-        study["INTERACTION"] = study['A_variant']+"*" +study['B_col']
+        study = study.copy()
+        if {"VARIANT", "Anchor_col"}.issubset(study.columns):
+            identifier = study["VARIANT"].astype(str)
+            if "Variant_col" in study:
+                encoded = study["Variant_col"]
+                identifier = identifier.where(encoded.isna(), identifier + ":" + encoded.fillna("").astype(str))
+            study["INTERACTION"] = identifier + "*" + study["Anchor_col"].astype(str)
+            # Keep the existing meta engine compatible with both export schemas.
+            for source, target in (("Beta", "I_coef"), ("StdErr", "I_StdErr"),
+                                   ("CI-lower", "I_CI_0.025"), ("CI-upper", "I_CI_0.975")):
+                if target not in study and source in study:
+                    study[target] = study[source]
+        else:
+            study["INTERACTION"] = study['A_variant'] + "*" + study['B_col']
         return _compute_se_interaction(study), None
     else:
         return _compute_se(study), None

@@ -6,6 +6,7 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 import pgenlib
+import time
 
 from .HLAdat import HLAdata
 from .io import GenomicsFileReader, _add_variant_info
@@ -277,6 +278,13 @@ def read_genotype(
     >>> partners = read_genotype("chr7", format="pgen", variants=["rs1", "rs2"])
     >>> partners = read_genotype("chr7.raw", format="raw")
     """
+    start = time.time()
+    print("----------------", flush=True)
+    print("READING PLINK GENOTYPE DATA", flush=True)
+    print(f"File:\t{fileloc}", flush=True)
+    print(f"Format:\t{format}", flush=True)
+    print("----------------", flush=True)
+
     if format not in {"pgen", "bfile", "raw"}:
         raise ValueError("format must be 'pgen', 'bfile', or 'raw'")
     if dosage_allele is None:
@@ -349,8 +357,13 @@ def read_genotype(
     effect = (counted.reindex(selected.index) if dosage_allele == "counted"
               else selected["ALT" if dosage_allele == "alt" else "REF"])
     if format == "raw":
-        return _read_raw(path, metadata, effect).reindex(selected.index).T
-    return _read_binary(path, metadata, samples, effect).T
+        genotype = _read_raw(path, metadata, effect).reindex(selected.index).T
+    else:
+        genotype = _read_binary(path, metadata, samples, effect).T
+    print(f"Elapsed time for processing: {time.time() - start:.4f} seconds", flush=True)
+    print()
+    print(f"TOTAL TIME TAKEN: {time.time() - start:.4f} seconds", flush=True)
+    return genotype 
 
 
 class PLINKFileReader(GenomicsFileReader):

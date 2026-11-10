@@ -20,9 +20,8 @@ analysis; this module never combines residue P-values. Different genomic coordin
 are preserved even if their gene and sequence position are the same.
 
 For current standard AA and AA omnibus interaction results, explicitly select
-`pval_col="P-value"` and `variant_col="VARIANT"`. Pairwise interaction results use
-`I_p` and represent individual encoded-column tests rather than AA block omnibus
-tests. Alternatively, supply `log10p_col="META_log10P"`, meaning **positive
+`pval_col="P-value"` and `variant_col="VARIANT"`. Pairwise interaction results also use `P-value`, but represent individual
+encoded-column tests rather than AA block omnibus tests. Alternatively, supply `log10p_col="META_log10P"`, meaning **positive
 −log₁₀(P)**, not log₁₀(P). No test columns are silently mixed by the plotting
 functions.
 

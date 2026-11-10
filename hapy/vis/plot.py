@@ -662,7 +662,7 @@ def plot_aa_interaction(data, *, variant_col='AA_VARIANT', partner_pos_col=None,
         chromosome per plot is supported; no assembly is inferred.
     pval_col : str or None, default None
         Actual P-value column, mutually exclusive with log10p_col. Defaults to
-        'LR_p' if neither is supplied; use 'I_p' for pairwise Wald results. Values
+        'LR_p' if neither is supplied; use 'P-value' for current hapy results. Values
         must satisfy 0 < P <= 1. Strings or Decimal values preserve tiny raw P.
     log10p_col : str or None, default None
         Column of finite nonnegative -log10(P), e.g. 'META_log10P'. Use this when
