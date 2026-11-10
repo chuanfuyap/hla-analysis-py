@@ -391,11 +391,20 @@ def run_interaction(
         sample_index=yser.index,
     )
 
+    covdf_model = (
+        covdf.drop(columns=cov_block_cols)
+        if b_kind == "COV"
+        else covdf
+    )
+
     if cond_df is not None:
-        covdf_model = cond_df.copy() if covdf is None else pd.concat([covdf, cond_df], axis=1)
+        covdf_model = (
+            cond_df.copy()
+            if covdf_model is None
+            else pd.concat([covdf_model, cond_df], axis=1)
+        )
         baseline_covars_model = list(baseline_covars) + cond_cols
     else:
-        covdf_model = covdf
         baseline_covars_model = list(baseline_covars)
 
     worker_state = {
