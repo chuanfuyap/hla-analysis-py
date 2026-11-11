@@ -195,11 +195,14 @@ results. Entirely missing columns and some zero-valued housekeeping columns may 
 |---|---|
 | `VARIANT`, `GENE`, `AA_POS` | Position-level identifier, gene and amino acid sequence position. |
 | `P-value` | P-value of either omnibus test or univariate amino acid position test. |
-| `TEST` | **MULTI**: omnibus test performed on multi-allelic positions, **SINGLE**: bi-allelic positions, i.e. two amino acids, **OVR**: one vs rest for single amino acid test in multi-allelic positions. |
-| `Statistic`, `DoF` | Test statistic and associated degrees of freedom. MULTI tests report the likelihood-ratio statistic; SINGLE tests report the t-statistic for linear regression or the Wald z-statistic for logistic regression. |
-| `Beta`, `StdErr` | Association effect estimate and standard error. MULTI tests report residue-specific estimates relative to the reference amino acid, formatted as `A=value;G=value`. Logistic regression coefficients are on the log-odds scale (not odds ratios); apply `np.exp()` to each coefficient to obtain odds ratios. |
-| `CI-lower`, `CI-upper` | Lower and upper limits of the 95% confidence interval, reported for SINGLE tests only. Their direction depends on the counted allele encoding. For logistic regression, apply `np.exp()` to these limits to obtain the 95% confidence interval for the odds ratio. |
-| `Ref_AA`, `Amino_Acids`, `AAcount` | Reference amino acid (the one dropped from modelling), available residue labels and allele count reported by the AA adapter. Labels reflect the input encoding. |
+| `TEST` | **MULTI**: omnibus test across multiple genotype columns; **SINGLE**: one genotype-column association, typically a biallelic AA position; **OVR**: an additional individual residue one-vs-rest test, including the opposite residue at an eligible biallelic position. OVR is only generated when `residue=True` |
+| `Statistic`, `DoF` | Test statistic and associated degrees of freedom. MULTI tests report the likelihood-ratio statistic and its degrees of freedom. SINGLE and OVR tests report the t-statistic for linear regression or the Wald z-statistic for logistic regression; their DoF field is not populated. |
+| `Beta`, `StdErr` | Association effect estimate and standard error. MULTI tests report residue-specific estimates relative to the reference amino acid, formatted as `A=value;G=value`. SINGLE and OVR tests report scalar estimates; OVR compares the tested residue with all other residues. Logistic regression coefficients are on the log-odds scale (not odds ratios); apply `np.exp()` to each coefficient to obtain odds ratios. |
+| `CI-lower`, `CI-upper` | Lower and upper limits of the 95% confidence interval, reported for SINGLE and OVR tests. Their direction depends on the counted allele encoding. For logistic regression, apply `np.exp()` to these limits to obtain the 95% confidence interval for the odds ratio. |
+| `Ref_AA`, `Amino_Acids`, `AAcount` | For position-level tests, the reference amino acid omitted from the design, available residue labels and allele count reported by the AA adapter. OVR rows use `Ref_AA="tested: X"`; the comparator is all other residues. `Amino_Acids` retains the position's available labels. |
+| `AA_AF` | AA frequencies on the final modelling samples, formatted as `F=0.2;S=0.8`. OVR rows report the tested residue frequency. Retained reference dosages are used where available; frequencies are not reconstructed from QC-filtered columns. |
+| `HLA_AF`, `MAF` | HLA allele frequency or SNP minor allele frequency on the final modelling samples for single-column HLA/SNP tests. |
+| `N_used`, `N_case`, `N_control` | Final number of complete-case modelling samples and, for binary outcomes, the case and control counts. Counts can differ by position or OVR test because of missing data. |
 | `INFO` | Blank or missing for successful tests. `insufficient variation` identifies AA positions with no eligible genotype columns after sample subsetting and allele-frequency processing. Fit diagnostics can instead report `not converged`, `non-finite coefficients`, `non-finite standard errors` or `non-finite log-likelihood`. MULTI diagnostics identify the null or full model. Failed checks leave test estimates missing. |
 | `COND_KIND`, `COND_VARIANTS`, `N_COND_VARIANTS` | Selected block kind, semicolon-separated conditioning variant IDs and number of conditioning variants. Present when applicable. |
 
@@ -207,11 +210,6 @@ Model warnings are not suppressed or automatically copied into `INFO`.
 Unexpected fitting exceptions can still stop analysis; `INFO` records the
 explicit checks described above.
 
-For survival analysis, the effect columns have a different interpretation:
-
-| Column | Meaning |
-|---|---|
-| `HR`, `StdErr`, `CI-lower`, `CI-upper` | Hazard ratio, standard error of the log-hazard coefficient and lower and upper limits of the 95% confidence interval for the hazard ratio. Reported for SINGLE tests only. HR > 1 indicates increased hazard and HR < 1 indicates decreased hazard per unit increase in genotype dosage. |
 
 Survival results also keep `INFO` as the last column. It is missing when the
 explicit checks pass. Reasons include `not converged` for a lifelines

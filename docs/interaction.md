@@ -78,7 +78,7 @@ that object: it must be supplied as `partner_data`, not as `hladat`.
 
 ### `mode="pairwise"`
 
-This is used for HLA (allele) and SNP data type.
+Use this mode for HLA allele or SNP pairs, or individual encoded AA residue pairs.
 
 For each selected A column and B column, fit:
 
@@ -100,7 +100,9 @@ pairwise = hp.stats.interaction(
 
 ### `mode="one_vs_block_omnibus"`
 
-`kind` must be `"AA"`.
+`"AA"` must be selected on at least one side: `kind="AA"` or `partner_kind="AA"`.
+If both sides are AA, the current runner treats the partner-side position as
+the omnibus block and tests it against each focal encoded column.
 
 ```text
 Null model: Y ~ baseline covariates + partner + AA block
@@ -109,14 +111,14 @@ Full model: Y ~ baseline covariates + partner + AA block
 ```
 
 The likelihood-ratio test compares the full and null models on the same
-complete-case samples. `LR_p` tests the interaction terms jointly; it does not
+complete-case samples. `P-value` tests the interaction terms jointly; it does not
 test the AA or partner main effect. A one-column AA block is also eligible.
 
 
-Predictor names must be distinct across the interacting columns and covariates.
-This also matters for AA–AA data where different positions can have identically
-named encoded residue columns. Selecting different position IDs alone does not
-ensure distinct model-column names.
+Keep predictor names distinct from baseline covariate names. Pairwise mode
+handles identical names on the two interacting sides internally. For omnibus
+AA–AA tests, overlapping encoded names can still collide: selecting different
+position IDs alone does not guarantee distinct model-column names.
 
 ## `interaction()` parameters
 
@@ -135,6 +137,7 @@ results = hp.stats.interaction(
     baseline_covar_cols=None,
     partner_data=partners,
     condition_on=None,
+    residue=False,
     verbose=True,
     use_progress_bar=False,
     print_every=500,
@@ -155,6 +158,7 @@ results = hp.stats.interaction(
 | `baseline_covar_cols` | list of strings or `None` | Covariate columns always included as adjustment terms. By default, all covariates are used, except the tested covariates when `partner_kind="COV"`. `[]` selects no baseline covariates. |
 | `partner_data` | `pandas.DataFrame` or `None` | Required for `partner_kind="DF"`. Rows are sample IIDs and columns are partner predictors. Use numeric dosages or explicitly numeric indicators. |
 | `condition_on` | `str`, sequence of strings or `None` | Same-kind A-side variant IDs added as adjustment terms. Tasks testing a listed A variant are excluded. |
+| `residue` | `bool`, default `False` | In pairwise mode, include the QC-passing reference AA residue when available. Requires AA on at least one side; other modes raise `ValueError`. Existing non-reference tests are retained. |
 | `verbose` | `bool`, default `True` | Print scheduled task counts, execution settings, progress and timing. |
 | `use_progress_bar` | `bool`, default `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
 | `print_every` | `int`, default `500` | Completed tasks between periodic progress messages. |
@@ -354,19 +358,100 @@ columns, so a requested empty block does not contribute adjustment terms.
 
 
 
-## Pairwise output columns
+## Reading the interaction results
 
-Pairwise model results use the same effect/test names as standard association
-output. The model creates these fields directly:
+Each row represents a tested predictor pair in `pairwise` mode, or an AA
+position–partner test in `one_vs_block_omnibus` mode. Output columns depend on
+the data types and mode. Entirely missing columns may be omitted. Interaction
+results do not include a `TEST` column; the test is determined by `config.mode`.
+
+### Variant information and frequencies
 
 | Column | Meaning |
 |---|---|
-| `P-value`, `Statistic` | Interaction coefficient test P-value and t-statistic (linear) or Wald z-statistic (logistic). |
-| `Beta`, `StdErr`, `CI-lower`, `CI-upper` | Interaction coefficient, standard error and 95% confidence interval. Logistic estimates are on the log-odds scale. |
-| `Variant_p`, `Variant_Beta` | Focal variant main-effect P-value and coefficient from the full interaction model. |
-| `Partner_p`, `Partner_Beta` | Partner* main-effect P-value and coefficient from the full interaction model. |
+| `VARIANT`, `GENE`, `AA_POS` | Tested variant identifier, gene and amino acid sequence position, where available. In omnibus mode, these describe the AA position being tested jointly, including when it is on the partner side. |
+| `Amino_Acids`, `Ref_AA`, `AAcount` | Available amino acid labels, reference residue and allele count, where reported. Additional residue results use `Ref_AA="tested: X"` to identify the tested residue. |
+| `Variant_col` | Selected encoded focal genotype column in pairwise analysis when a variant contains multiple tested columns. |
+| `Partner_col` | Interacting genotype or covariate column. In omnibus mode, this is the single predictor tested against the AA block. |
+| `Partner_*` annotations | Available information about the other block, such as gene, amino acid position and reference residue. An additional partner-side reference test uses `Partner_Ref_AA="tested: X"`. |
+| `AA_AF` | Amino acid frequencies on the final modelling samples, formatted as `F=0.2;S=0.8`. Additional reference-residue rows report the tested residue's frequency. |
+| `HLA_AF`, `MAF` | Focal HLA allele frequency or SNP minor allele frequency on the final modelling samples, where applicable. |
+| `Partner_AF` | Frequency of the selected genotype partner, calculated as mean dosage divided by two. External `partner_data` uses this genotype-dosage convention. |
+| `Partner_mean` | Mean of a numeric interacting covariate. For a numeric 0/1 predictor, this is the proportion coded 1. |
+| `Partner_proportion` | Proportion in the second category for a binary categorical or boolean interacting covariate. Check the category ordering when interpreting this value. |
 
-Partner refers to the component (either genetic or environment) interacting with HLA variant being analysed.
+Frequencies and the selected partner's summary use the samples included in that
+interaction model and can differ between tests because of missing data. AA
+dosage frequencies are calculated without renormalising the remaining residues
+after QC filtering. Copied partner annotation fields are distinct from the
+selected predictor's `Partner_AF`/mean/proportion summary.
+
+### Pairwise interaction statistics
+
+For the model:
+
+```text
+Y ~ baseline covariates + variant + partner + variant:partner
+```
+
+the primary result tests the `variant:partner` coefficient.
+
+| Column | Meaning |
+|---|---|
+| `P-value` | Two-sided interaction coefficient P-value. |
+| `Statistic` | t-statistic for linear regression or Wald z-statistic for logistic regression. |
+| `Beta`, `StdErr` | Interaction coefficient and its standard error. |
+| `CI-lower`, `CI-upper` | Lower and upper limits of the interaction coefficient's 95% confidence interval. |
+| `Variant_p`, `Variant_Beta` | Focal variant main-effect P-value and coefficient from the full interaction model. |
+| `Partner_p`, `Partner_Beta` | Partner main-effect P-value and coefficient from the full interaction model. |
+
+For linear regression, `Beta` describes how the effect of one predictor changes
+with a one-unit increase in the other predictor. For logistic regression,
+coefficients and confidence intervals are on the log-odds scale. Applying
+`np.exp()` to the interaction coefficient gives a ratio of odds ratios, rather
+than an overall disease odds ratio.
+
+Main effects are conditional on the other interacting predictor being zero.
+For example, `Variant_Beta` describes the variant effect when the partner equals
+zero. These are not estimates from separate association models without interaction.
+
+### Omnibus interaction statistics
+
+`one_vs_block_omnibus` compares models with and without all partner-by-AA
+interaction terms, retaining the same main effects and adjustment covariates.
+
+| Column | Meaning |
+|---|---|
+| `P-value` | Likelihood-ratio P-value testing the interaction terms jointly. |
+| `Statistic` | Likelihood-ratio statistic: twice the difference between the full and null log-likelihoods. |
+| `DoF` | Difference in fitted model degrees of freedom between the full and null models. |
+
+This tests whether the AA position interacts with the partner. It does not
+separately test either main effect. The omnibus result does not report a single
+interaction coefficient or confidence interval because several interaction
+coefficients may be tested jointly. It also does not identify which residue
+drives the result.
+
+### Sample counts and fitting information
+
+| Column | Meaning |
+|---|---|
+| `N_used` | Final number of complete-case samples used in the model. |
+| `N_case`, `N_control` | Numbers of cases and controls among the modelling samples for binary outcomes. |
+| `N_missing_Y` | Number of rows excluded because the phenotype was missing. May be omitted when zero throughout the table. |
+| `N_dropped_other` | Further exclusions because genotype, covariate or conditioning information was missing. May be omitted when zero throughout the table. |
+| `INFO` | Missing for fits passing the explicit checks; otherwise describes a fitting problem or absence of complete-case samples. The column can be omitted if entirely missing. |
+
+Fit messages can include `not converged`, `non-finite coefficients`,
+`non-finite standard errors` or `non-finite log-likelihood`. Omnibus messages
+identify whether the null or full model failed. Failed checks leave statistical
+estimates missing; empty statistic columns can remain in tables containing failures.
+
+Model warnings are not automatically copied into `INFO`. A missing `INFO`
+value means the implemented checks passed; it does not establish that every
+model assumption is satisfied. Unexpected fitting exceptions can still stop
+analysis. Genotype blocks with no eligible columns may produce no scheduled
+interaction rows, rather than a row with a fitting message.
 
 ## Saving and plotting
 
@@ -386,7 +471,7 @@ supply a position column when an ID cannot be parsed.
 
 ## Optional reference-residue interactions
 
-For `kind=AA`, you can set `residue=True` in `config.mode="pairwise"` to include the QC-passing reference residue as well, without duplicating the existing tests. 
+With AA on either side, set `residue=True` and `config.mode="pairwise"` to include the QC-passing reference residue without duplicating existing tests.
 
 ```python
 results = hp.stats.interaction(

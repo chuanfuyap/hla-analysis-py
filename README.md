@@ -157,10 +157,9 @@ See [visualisation documentation](docs/visualisation.md) and
 ## Status
 
 The core analysis framework is functional and actively under development. Current work includes:
-- single residue analysis 
 - stepwise conditional analyses
 - allele mapping
-- motif analysis
+- haplotype analysis
 
 ## Contact
 
