@@ -57,7 +57,7 @@ ivw, stouffer = hp.meta.meta_analyse(
 
 Use the same column mapping and delimiter for all cohort tables in a call. `sep=","` is the default. The list of paths itself always uses one path per line. `variant_col` also names the identifier column in standard meta-analysis output.
 
-| Parameter | Type and default | Meaning |
+| Parameter | Type | Meaning |
 | --- | --- | --- |
 | `fileloc` | `str` or `Path` | File listing the independent cohort result files. |
 | `data_type` | `"AA"`, `"HLA"` or `"SNP"` | Genotype result type. HLA/SNP effects use IVW. |
