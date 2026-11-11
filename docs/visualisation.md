@@ -154,6 +154,56 @@ for an unambiguous 2D view. Explicit `duplicate="error"` rejects repeats, while
 `duplicate="max"` warns and selects the largest −log₁₀(P) per pair (ties keep the
 first input row). This optional visual aggregation does not combine P-values.
 
+## Plot input parameters
+
+Defaults below are the function defaults. For current hapy result tables,
+explicitly select `variant_col="VARIANT"` and `pval_col="P-value"`, or provide
+`log10p_col` for meta-analysis results. Input identifiers and significance values
+must follow the requirements above.
+
+### `plot_aa_association()`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `data` | `pandas.DataFrame` | **Required** | Position-level results. Input is not modified; filter out residue OVR rows before plotting. |
+| `variant_col` | `str` | `"VARIANT"` | AA position identifier column. For current hapy outputs, set `variant_col="VARIANT"` explicitly; interaction meta IDs may include `AA_ID*partner`. |
+| `pval_col` | `str` or `None` | `None` | Raw P-value column, mutually exclusive with `log10p_col`. Set to `"P-value"` for current results; if neither significance column is supplied, the code uses `"LR_p"`. |
+| `log10p_col` | `str` or `None` | `None` | Finite nonnegative minus-log10(P) column, such as `"META_log10P"`. Mutually exclusive with `pval_col`. |
+| `genes` | `str`, iterable of `str` or `None` | `None` | Case-insensitive gene selection. Numeric amino acid X coordinates require a single gene in the selected data. |
+| `x_axis` | `str` | `"amino_acid"` | `"amino_acid"`, `"genomic"` or `"equally_spaced"`; see X-axis layouts above. |
+| `highlights` | iterable or `None` | `None` | Selected gene/position tuples or exact position IDs. Interaction tuples also include the partner genomic position. |
+| `highlight_top` | `bool` or `int` | `False` | `True` highlights the strongest result; a positive integer selects the top N; `False` disables automatic selection. |
+| `annotate_p` | `bool` | `True` | Show automatic labels on highlighted points. `False` permits highlighting without automatic annotations. |
+| `annotations` | mapping, callable or `None` | `None` | Custom text keyed by highlight identifiers, or a callable receiving a parsed row. A callable may return `None` to omit its label. |
+| `annotation_offsets` | mapping or `None` | `None` | Highlight keys mapped to `(dx, dy)` label offsets in points. |
+| `significance_threshold` | scalar, iterable or `None` | `None` | Raw P-value threshold for a horizontal line. Mutually exclusive with `threshold_log10p`. |
+| `threshold_log10p` | scalar, iterable or `None` | `None` | Threshold already expressed as minus log10(P). |
+| `threshold_kwargs` | mapping or `None` | `None` | Matplotlib styling for the threshold line. |
+| `ax` | Matplotlib `Axes` or `None` | `None` | Existing 2D axes for association/heatmap or 3D axes for scatter3d. `None` creates a figure and axes. |
+
+### `plot_aa_interaction()`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `data` | `pandas.DataFrame` | **Required** | Position-level results. Input is not modified; filter out residue OVR rows before plotting. |
+| `variant_col` | `str` | `"AA_VARIANT"` | AA position identifier column. For current hapy outputs, set `variant_col="VARIANT"` explicitly; interaction meta IDs may include `AA_ID*partner`. |
+| `partner_pos_col` | `str` or `None` | `None` | Partner genomic base-pair position column. Required when partner IDs cannot provide coordinates. |
+| `partner_variant_col` | `str` or `None` | `None` | Partner ID column used for labels and coordinate parsing. Parseable IDs must agree with an explicitly supplied position column. |
+| `partner_chrom` | `str`, `int` or `None` | `None` | Explicit partner chromosome for labels and consistency checks; otherwise inferred from parseable partner IDs. |
+| `pval_col` | `str` or `None` | `None` | Raw P-value column, mutually exclusive with `log10p_col`. Set to `"P-value"` for current results; if neither significance column is supplied, the code uses `"LR_p"`. |
+| `log10p_col` | `str` or `None` | `None` | Finite nonnegative minus-log10(P) column, such as `"META_log10P"`. Mutually exclusive with `pval_col`. |
+| `kind` | `str` | `"scatter3d"` | Interaction rendering mode: `"scatter3d"` or `"heatmap"`. |
+| `genes` | `str`, iterable of `str` or `None` | `None` | Case-insensitive gene selection. Numeric amino acid X coordinates require a single gene in the selected data. |
+| `x_axis` | `str` | `"amino_acid"` | `"amino_acid"`, `"genomic"` or `"equally_spaced"`; see X-axis layouts above. |
+| `highlights` | iterable or `None` | `None` | Selected gene/position tuples or exact position IDs. Interaction tuples also include the partner genomic position. |
+| `highlight_top` | `bool` or `int` | `False` | `True` highlights the strongest result; a positive integer selects the top N; `False` disables automatic selection. |
+| `annotate_p` | `bool` | `True` | Show automatic labels on highlighted points. `False` permits highlighting without automatic annotations. |
+| `annotations` | mapping, callable or `None` | `None` | Custom text keyed by highlight identifiers, or a callable receiving a parsed row. A callable may return `None` to omit its label. |
+| `annotation_offsets` | mapping or `None` | `None` | Highlight keys mapped to `(dx, dy)` label offsets in points. |
+| `duplicate` | `str` | `"keep"` | Coordinate-repeat policy: `"keep"`, `"error"` or `"max"`. `max` is explicit visual aggregation, not a combined test. |
+| `annotate_cells` | `bool` | `False` | Annotate observed heatmap points with formatted P-values. Has no effect on scatter3d. |
+| `ax` | Matplotlib `Axes` or `None` | `None` | Existing 2D axes for association/heatmap or 3D axes for scatter3d. `None` creates a figure and axes. |
+
 ## Annotations and styling
 
 `annotate_p=False` highlights without default labels. `annotations` can be a mapping
@@ -166,26 +216,61 @@ points; use it for dense figures. 3D labels are reprojected on every draw/view c
 
 Shared styling keywords (passed directly to either plotting function):
 
-| Options | Meaning / defaults |
-|---|---|
-| `figsize`, `dpi` | Figure size `(9, 5)` inches; resolution `300` |
-| `title`, `title_size`, `title_weight` | Title and font styling (`14`, `normal`) |
-| `xlabel`, `ylabel`, `zlabel`, `label_size`, `label_weight` | Axis labels and fonts (`11`, `normal`) |
-| `tick_size`, `x_ticks`, `y_ticks`, `z_ticks` | Tick font size `9`; approximate maximum tick intervals `6`, `6`, `5` |
-| `cmap`, `vmin`, `vmax`, `norm` | `viridis`; default range zero to largest score (at least 1). Supply limits or a shared Matplotlib Normalize, not both |
-| `marker`, `marker_size`, `alpha`, `edgecolor`, `linewidth` | Circle / square; area 25 / 100 points²; alpha .9; no edges; width .5 |
-| `highlight_color`, `highlight_size` | Gold fill/red outline; default area max(80, 2.5 times ordinary markers) |
-| `colorbar`, `colorbar_label` | Enabled; label −log₁₀(P) |
-| `annotation_fontsize`, `annotation_offset`, `annotation_arrows` | `9`, `(8, 12)` points, connectors enabled |
-| `annotation_kwargs` | Additional Matplotlib annotation text properties (e.g. color, bbox, ha) |
-| `xlim`, `ylim`, `zlim` | Limits in original base-pair / significance units, even when ticks display Mb |
-| `position_unit`, `xformatter`, `yformatter` | `bp` or `Mb`; optional Matplotlib Formatter or `(value, tick_position)` callable |
-| `reference_build` | User-supplied build label; no coordinate transformation |
-| `elev`, `azim` | 3D viewing angles `25`, `-60` degrees |
-| `missing_color` | Heatmap background `#eeeeee` |
-| `rasterized` | False; rasterise scatter artists when requested |
-| `save_path`, `save_kwargs`, `show` | Optional PNG/PDF/SVG path; extra savefig options; display False |
-| `p_digits` | Significant figures for actual P-value labels: `3` |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `figsize` | tuple of two numbers | `(9, 5)` | New figure width and height in inches. |
+| `dpi` | `int` | `300` | Figure and default export resolution. |
+| `title` | `str` or `None` | `None` | Figure title; `None` leaves the title blank. |
+| `title_size` | number | `14` | Title font size in points. |
+| `title_weight` | `str` or number | `"normal"` | Title font weight. |
+| `xlabel` | `str` or `None` | `None` | X-axis label; `None` generates the label from the selected coordinates. |
+| `ylabel` | `str` or `None` | `None` | Y-axis label; `None` generates the plot label. |
+| `zlabel` | `str` or `None` | `None` | 3D Z-axis label; `None` uses minus log10(P). |
+| `label_size` | number | `11` | Axis-label font size in points. |
+| `label_weight` | `str` or number | `"normal"` | Axis-label font weight. |
+| `tick_size` | number | `9` | Tick-label font size in points. |
+| `x_ticks` | `int` | `6` | Approximate maximum X tick intervals. |
+| `y_ticks` | `int` | `6` | Approximate maximum Y tick intervals. |
+| `z_ticks` | `int` | `5` | Approximate maximum 3D Z tick intervals. |
+| `cmap` | `str` or Matplotlib colormap | `"viridis"` | Significance colour map. |
+| `norm` | Matplotlib `Normalize` or `None` | `None` | Shared colour normalisation. Do not combine with explicit `vmin`/`vmax`. |
+| `vmin` | number or `None` | `None` | Colour-scale lower limit; `None` uses zero unless `norm` is supplied. |
+| `vmax` | number or `None` | `None` | Colour-scale upper limit; `None` uses the largest score, at least one, unless `norm` is supplied. |
+| `marker` | Matplotlib marker or `None` | `None` | `None` selects circles for scatter plots and squares for heatmaps. |
+| `marker_size` | number or `None` | `None` | Marker area in points squared; `None` selects 25 for scatter plots or 100 for heatmaps. |
+| `alpha` | number | `0.9` | Ordinary point opacity, from zero to one. |
+| `edgecolor` | Matplotlib colour | `"none"` | Ordinary marker edge colour. |
+| `linewidth` | number | `0.5` | Ordinary marker edge width. |
+| `highlight_color` | Matplotlib colour | `"gold"` | Default highlighted-point fill. |
+| `highlight_facecolor` | Matplotlib colour or `None` | `None` | Explicit highlight fill overriding `highlight_color` when supplied. |
+| `highlight_edgecolor` | Matplotlib colour | `"red"` | Highlighted-point outline colour. |
+| `highlight_linewidth` | number | `1.2` | Highlighted-point outline width. |
+| `highlight_alpha` | number | `1.0` | Highlighted-point opacity. |
+| `highlight_size` | number or `None` | `None` | Highlighted marker area; `None` uses max(80, 2.5 times ordinary marker size). |
+| `colorbar` | `bool` | `True` | Draw a significance colour bar. |
+| `colorbar_label` | `str` | `"\u2212log\u2081\u2080(P)"` | Colour-bar label. |
+| `annotation_style` | `str` | `"full"` | `"full"` or `"compact"` automatic annotation text. |
+| `annotation_partner` | `bool` | `True` | Include partner information in interaction annotations. |
+| `annotation_avoid_overlap` | `bool` | `True` | Apply heuristic automatic label placement. |
+| `annotation_fontsize` | number | `9` | Annotation font size in points. |
+| `annotation_offset` | tuple of two numbers | `(8, 12)` | Default `(dx, dy)` label offset in points. |
+| `annotation_arrows` | `bool` | `True` | Draw annotation connectors. |
+| `annotation_kwargs` | mapping | `{}` | Additional Matplotlib annotation text properties. |
+| `xlim` | tuple of two numbers or `None` | `None` | X limits in selected coordinate units: sequence position, genomic bp or zero-based ordinal indices. |
+| `ylim` | tuple of two numbers or `None` | `None` | Y limits: minus log10(P) for association, genomic bp for interaction. |
+| `zlim` | tuple of two numbers or `None` | `None` | 3D Z limits in minus log10(P). |
+| `position_unit` | `str` | `"bp"` | Genomic tick units: `"bp"` or `"Mb"`. Does not rescale numeric sequence positions or supplied axis limits. |
+| `xformatter` | Matplotlib formatter, callable or `None` | `None` | Custom X tick formatter; a callable receives `(value, tick_position)`. |
+| `yformatter` | Matplotlib formatter, callable or `None` | `None` | Custom interaction Y genomic tick formatter. |
+| `reference_build` | `str` or `None` | `None` | User-supplied genome-build label only; no coordinate conversion. |
+| `rasterized` | `bool` | `False` | Rasterise scatter artists when exporting; leave false for fully vector points. |
+| `elev` | number | `25` | 3D viewing elevation in degrees. |
+| `azim` | number | `-60` | 3D viewing azimuth in degrees. |
+| `missing_color` | Matplotlib colour | `"#eeeeee"` | Sparse heatmap background for unobserved coordinates. |
+| `save_path` | `str`, `pathlib.Path` or `None` | `None` | Optional PNG/PDF/SVG output path. Parent directory must exist. |
+| `save_kwargs` | mapping | `{}` | Additional Matplotlib `savefig` options. |
+| `show` | `bool` | `False` | Display the figure after creation. |
+| `p_digits` | `int` | `3` | Significant figures in formatted P-value labels. |
 
 `ax=` accepts an existing 2D axes for association/heatmap, or a 3D axes for scatter3d.
 With existing axes, their figure size/layout is retained; `figsize` applies only to

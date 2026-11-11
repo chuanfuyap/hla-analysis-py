@@ -202,24 +202,31 @@ API. Unexpected input or fitting exceptions can still stop the run.
 
 ## API and execution options
 
-| Parameter | Type and default | Meaning |
-|---|---|---|
-| `hladat` | `HLAdata` | Loaded genotype object. |
-| `famfile` | `pandas.DataFrame` | Required IID table; the survival endpoint is not read from `PHENO`. |
-| `config` | `hp.stats.SurvivalConfig` | Parallel settings; Cox fitting is selected automatically. |
-| `kind` | `"AA"`, `"HLA"` or `"SNP"` | Loaded block to analyse. |
-| `event_time` | `pandas.DataFrame` | Exactly `sample_id`, `time` and `event`, one endpoint per subject. |
-| `covar` | `DataFrame`, CSV path or `None` | IID-indexed baseline covariates. Default `None`. |
-| `dynamic_covar` | `DataFrame` or `None` | Time-zero values and subsequent updates; default `None` fits static Cox. |
-| `variant_filter` | callable or `None` | Select variants before testing. Reuse the ID/gene filter helpers shown in the association guide. |
-| `verbose` | `bool`, `True` | Print execution settings, progress and timing. |
-| `use_progress_bar` | `bool`, `False` | Use tqdm progress when available and verbose output is enabled. |
-| `print_every` | `int`, `100` | Completed variants between periodic progress messages. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `hladat` | `HLAdata` | **Required** | Loaded genotype object. The block selected by `kind` must already be loaded. |
+| `famfile` | `pandas.DataFrame` | **Required** | Required sample table containing `IID`. Its `PHENO` column is not used for survival analysis. |
+| `config` | `hp.stats.SurvivalConfig` | **Required** | Parallel execution settings. The Cox fitter is selected from the presence or absence of `dynamic_covar`. |
+| `kind` | `str` | **Required** | Loaded genotype block: `"AA"`, `"HLA"` or `"SNP"`. |
+| `event_time` | `pandas.DataFrame` | **Required** | Exactly `sample_id`, `time` and `event`, with one endpoint per subject. Time must be positive and finite; event must be 0 or 1. |
+| `covar` | `pandas.DataFrame`, `str`, `pathlib.Path` or `None` | `None` | IID-indexed covariates, or a comma-separated CSV path with sample IDs in its first column. Read other delimiters explicitly with pandas. Contains baseline predictors only. |
+| `dynamic_covar` | `pandas.DataFrame` or `None` | `None` | Time-zero covariate values and subsequent updates, with `sample_id` and `time` columns. `None` selects static Cox. |
+| `variant_filter` | callable or `None` | `None` | Function receiving a variant context and returning `True` to keep or `False` to exclude it. Use ID/gene filter helpers rather than a bare list. |
+| `verbose` | `bool` | `True` | Print execution settings, task counts, progress and timing. |
+| `use_progress_bar` | `bool` | `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
+| `print_every` | `int` | `100` | Completed analysis tasks between periodic progress messages. |
 
-`SurvivalConfig` accepts `n_jobs=1`, `backend="process"`, `batch_size=32` and
-`chunksize=8` by default. A single worker runs sequentially. With multiple
-process workers, put script execution inside `if __name__ == "__main__":`.
-`backend="thread"` is also available. Parallel settings do not select a different
+### `SurvivalConfig`
+
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `n_jobs` | `int` | `1` | Number of workers. Use `1` for sequential execution. |
+| `backend` | `str` | `"process"` | Parallel backend: `"process"` or `"thread"`. Used when `n_jobs > 1`. |
+| `batch_size` | `int` | `32` | Number of analysis tasks per submitted batch. |
+| `chunksize` | `int` | `8` | Maximum number of batch futures in flight, not the number of tasks per batch. |
+
+With multiple process workers, put script execution inside
+`if __name__ == "__main__":`. Parallel settings do not select a different
 statistical model.
 
 To select a gene, for example:

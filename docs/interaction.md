@@ -144,35 +144,36 @@ results = hp.stats.interaction(
 )
 ```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `hladat` | `HLAdata` | Genotype object containing HLA genotype information |
-| `config` | `hp.stats.InteractionConfig` | Model, interaction mode and parallel settings. |
-| `kind`, `partner_kind` | `str` | Required block types; see the block table above. |
-| `famfile` | `pandas.DataFrame` or `None` | Optional FAM table with `IID`, and `PHENO` when `y` is omitted. Required for an unindexed phenotype array. |
-| `covar` | `pandas.DataFrame`, `str`, `Path` or `None` | IID-indexed covariates, or a CSV path with sample IDs in the first column. Load whitespace-delimited files explicitly with pandas. Required for `partner_kind="COV"`. |
-| `y` | `pandas.Series`, one-dimensional array-like or `None` | IID-indexed phenotype Series, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
-| `variant_filter` | callable or `None` | Select HLA-side variants by ID or reader metadata before genotype blocks are constructed. Reuse the standard variant/gene filter helpers. Does not filter partner-side predictors or conditioning adjustment terms. You can filter partner side with the pandas indexing. |
-| `pair_filter` | callable or `None` | Function receiving a candidate interaction context and returning `True` to keep or `False` to exclude it. See examples below. |
-| `cov_block_cols` | list of strings or `None` | Covariate columns to test as predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
-| `baseline_covar_cols` | list of strings or `None` | Covariate columns always included as adjustment terms. By default, all covariates are used, except the tested covariates when `partner_kind="COV"`. `[]` selects no baseline covariates. |
-| `partner_data` | `pandas.DataFrame` or `None` | Required for `partner_kind="DF"`. Rows are sample IIDs and columns are partner predictors. Use numeric dosages or explicitly numeric indicators. |
-| `condition_on` | `str`, sequence of strings or `None` | Same-kind A-side variant IDs added as adjustment terms. Tasks testing a listed A variant are excluded. |
-| `residue` | `bool`, default `False` | In pairwise mode, include the QC-passing reference AA residue when available. Requires AA on at least one side; other modes raise `ValueError`. Existing non-reference tests are retained. |
-| `verbose` | `bool`, default `True` | Print scheduled task counts, execution settings, progress and timing. |
-| `use_progress_bar` | `bool`, default `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
-| `print_every` | `int`, default `500` | Completed tasks between periodic progress messages. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `hladat` | `HLAdata` | **Required** | Loaded genotype object. The block selected by `kind` must already be loaded. |
+| `config` | `hp.stats.InteractionConfig` | **Required** | Model type, interaction mode and parallel execution settings; see below. |
+| `kind` | `str` | **Required** | Loaded genotype block: `"AA"`, `"HLA"` or `"SNP"`. |
+| `partner_kind` | `str` | **Required** | Partner block: `"AA"`, `"HLA"`, `"SNP"`, `"COV"` or `"DF"`. See the block-selection table above. |
+| `famfile` | `pandas.DataFrame` or `None` | `None` | Sample table containing `IID` and, when `y` is omitted, `PHENO`. Required when `y` is an unindexed array. |
+| `covar` | `pandas.DataFrame`, `str`, `pathlib.Path` or `None` | `None` | IID-indexed covariates, or a comma-separated CSV path with sample IDs in its first column. Read other delimiters explicitly with pandas. Required for `partner_kind="COV"`. |
+| `y` | `pandas.Series`, one-dimensional array-like or `None` | `None` | Phenotype Series indexed by IID, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
+| `variant_filter` | callable or `None` | `None` | Select focal variants before genotype construction. Does not filter partner predictors or conditioning terms; subset partner data separately. |
+| `pair_filter` | callable or `None` | `None` | Function receiving a candidate interaction context and returning `True` to keep or `False` to exclude it, after genotype blocks are constructed. |
+| `cov_block_cols` | list of `str` or `None` | `None` | Covariate columns tested as interacting predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
+| `baseline_covar_cols` | list of `str` or `None` | `None` | Baseline adjustment columns. `None` selects all covariates except the tested COV partner columns. `[]` selects no baseline covariates. |
+| `partner_data` | `pandas.DataFrame` or `None` | `None` | External IID-indexed partner predictors. Required for `partner_kind="DF"`; use numeric dosages or numeric indicators. |
+| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind focal variant IDs included as adjustment terms. Conditioning variants are excluded from focal testing. For AA, use position IDs without residue suffixes. |
+| `residue` | `bool` | `False` | In pairwise mode, add an available QC-passing reference AA residue without duplicating existing tests. Requires AA on at least one side; other modes raise `ValueError`. |
+| `verbose` | `bool` | `True` | Print execution settings, task counts, progress and timing. |
+| `use_progress_bar` | `bool` | `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
+| `print_every` | `int` | `500` | Completed analysis tasks between periodic progress messages. |
 
 ### `InteractionConfig`
 
-| Parameter | Type | Description |
-|---|---|---|
-| `model_type` | `"logit"` or `"linear"` | Required. Logistic regression for binary outcomes or ordinary least squares for continuous outcomes. |
-| `mode` | `"pairwise"` or `"one_vs_block_omnibus"` | Default `"pairwise"`. Choose explicitly for AA position-level interaction tests. |
-| `n_jobs` | `int`, default `1` | Number of workers; 1 runs sequentially. |
-| `backend` | `"process"` or `"thread"`, default `"process"` | Parallel execution method. Threads can be used in Jupyter notebooks. |
-| `batch_size` | `int`, default `32` | Interaction tasks submitted in each batch. |
-| `chunksize` | `int`, default `8` | Maximum number of batch futures in flight. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `model_type` | `str` | **Required** | `"logit"` for binary outcomes or `"linear"` for continuous outcomes. |
+| `n_jobs` | `int` | `1` | Number of workers. Use `1` for sequential execution. |
+| `backend` | `str` | `"process"` | Parallel backend: `"process"` or `"thread"`. Used when `n_jobs > 1`. |
+| `batch_size` | `int` | `32` | Number of analysis tasks per submitted batch. |
+| `chunksize` | `int` | `8` | Maximum number of batch futures in flight, not the number of tasks per batch. |
+| `mode` | `str` | `"pairwise"` | `"pairwise"` or `"one_vs_block_omnibus"`. Omnibus requires AA on at least one side. |
 
 Process execution requires an `if __name__ == "__main__":` script guard.
 

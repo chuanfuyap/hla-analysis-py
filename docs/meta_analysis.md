@@ -57,21 +57,23 @@ ivw, stouffer = hp.meta.meta_analyse(
 
 Use the same column mapping and delimiter for all cohort tables in a call. `sep=","` is the default. The list of paths itself always uses one path per line. `variant_col` also names the identifier column in standard meta-analysis output.
 
-| Parameter | Type | Meaning |
-| --- | --- | --- |
-| `fileloc` | `str` or `Path` | File listing the independent cohort result files. |
-| `data_type` | `"AA"`, `"HLA"` or `"SNP"` | Genotype result type. HLA/SNP effects use IVW. |
-| `beta`, `se` | `str`: `"Beta"`, `"StdErr"` | Scalar effect and standard-error columns for IVW. Not required for positions routed only to Stouffer. |
-| `pval` | `str`: `"P-value"` | P-value column for Stouffer, requiring `0 < P <= 1`. |
-| `variant_col` | `str`: `"VARIANT"` | Position or variant identifier. |
-| `test_col` | `str`: `"TEST"` | AA standard test labels: `SINGLE`, `MULTI`, `OVR`. Not required for HLA/SNP or interaction tables. |
-| `n_col` | `str` or `None`: `"N_used"` | Actual modelling sample-count column. |
-| `case_col`, `control_col` | `str` or `None`: `"N_case"`, `"N_control"` | Case/control counts for effective sample-size weights. |
-| `interaction` | `bool`: `False` | Read interaction results. |
-| `partner_col` | `str`: `"Partner_col"` | Partner identifier for interaction tables. |
-| `feature_col` | `str` or `None`: `"Variant_col"` | Optional encoded feature for HLA/SNP pairwise interaction keys. |
-| `prefix` | `str`: `"META"` | Prefix for combined statistical output columns. |
-| `sep` | `str`: `","` | Delimiter in cohort result files. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `fileloc` | `str` or `pathlib.Path` | **Required** | Text file listing one independent cohort result file per nonblank line. |
+| `data_type` | `str` | **Required** | Result type: `"AA"`, `"HLA"` or `"SNP"`. HLA/SNP effects use IVW. |
+| `beta` | `str` | `"Beta"` | Scalar effect column for IVW. Not required for positions routed only to Stouffer. |
+| `se` | `str` | `"StdErr"` | Standard-error column for IVW. Not reconstructed from confidence intervals. |
+| `pval` | `str` | `"P-value"` | P-value column for Stouffer, requiring `0 < P <= 1`. |
+| `variant_col` | `str` | `"VARIANT"` | Input position/variant identifier. Also names the standard meta-analysis output key. |
+| `prefix` | `str` | `"META"` | Prefix for combined statistical output columns. |
+| `interaction` | `bool` | `False` | Read interaction results. AA inputs must be position-level omnibus results; HLA/SNP pairwise effects use IVW. |
+| `test_col` | `str` | `"TEST"` | AA standard test-label column: `SINGLE`, `MULTI` or `OVR`. Not required for HLA/SNP or interaction tables. |
+| `n_col` | `str` or `None` | `"N_used"` | Modelling sample-count column. `None` disables this count. |
+| `case_col` | `str` or `None` | `"N_case"` | Case-count column for effective sample-size weights. `None` disables this count. |
+| `control_col` | `str` or `None` | `"N_control"` | Control-count column for effective sample-size weights. `None` disables this count. |
+| `partner_col` | `str` | `"Partner_col"` | Partner identifier column for interaction tables. |
+| `feature_col` | `str` or `None` | `"Variant_col"` | Optional encoded feature for HLA/SNP pairwise interaction keys. `None` disables it. |
+| `sep` | `str` | `","` | Delimiter in cohort result files. Use `"\t"` for TSV; the path-list file always uses one path per line. |
 
 Optional count columns may be absent. Set a count parameter to `None` to disable it. The selected counts are mapped internally to the weighting fields; unrelated existing count columns do not override that selection.
 

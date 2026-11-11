@@ -37,14 +37,14 @@ but works without one. Selected variants with metadata must be biallelic with
 known, distinct REF and ALT alleles. Duplicate variant IDs or sample IIDs are
 rejected. Dosages use PLINK's diploid 0–2 scale.
 
-| Parameter | Type | Description |
-|---|---|---|
-| `fileloc` | `str` or `Path` | Fileset prefix or `.pgen`, `.bed`, or `.raw` filename. |
-| `format` | `"pgen"`, `"bfile"`, or `"raw"` | Input format; defaults to `"pgen"`. Specify it for RAW and bfile. |
-| `pvarfileloc` | `str` or `Path`, optional | PVAR path for PGEN or RAW; defaults to `<prefix>.pvar`. RAW permits no PVAR. Not applicable to bfile. |
-| `psamfileloc` | `str` or `Path`, optional | PGEN-only PSAM path; defaults to `<prefix>.psam`. |
-| `variants` | iterable of strings or string, optional | Exact variant IDs to read, in requested order. Defaults to all variants; unknown or repeated IDs raise an error. An empty list returns samples with no genotype columns. |
-| `dosage_allele` | `"alt"`, `"ref"`, `"counted"`, or `None` | `None` (default) counts ALT for binary files and the header's counted allele for RAW. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `fileloc` | `str` or `pathlib.Path` | **Required** | Fileset prefix or `.pgen`, `.bed` or `.raw` filename. |
+| `format` | `str` | `"pgen"` | PLINK input format: `"pgen"`, `"bfile"` or `"raw"`. Specify explicitly for bfile and RAW. |
+| `pvarfileloc` | `str`, `pathlib.Path` or `None` | `None` | PVAR path for PGEN or RAW. `None` uses `<prefix>.pvar` when available; PGEN requires it, RAW does not. Not used for bfile. |
+| `psamfileloc` | `str`, `pathlib.Path` or `None` | `None` | PGEN-only PSAM path. `None` uses `<prefix>.psam`. |
+| `variants` | `str`, iterable of `str` or `None` | `None` | Exact variant IDs in requested order. `None` reads all variants; `[]` returns samples with no genotype columns. Unknown or repeated IDs raise an error. |
+| `dosage_allele` | `str` or `None` | `None` | `"alt"`, `"ref"` or RAW-only `"counted"`. `None` counts ALT for binary input and the header allele for RAW. Explicit RAW REF/ALT requests require PVAR. |
 
 Variant selection happens **before binary dosage decoding**. For RAW it restricts
 the genotype columns loaded numerically, while the text file is still scanned.

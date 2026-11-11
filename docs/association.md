@@ -98,26 +98,27 @@ results = hp.stats.analyse(
     y=None,
     variant_filter=None,
     condition_on=None,
+    residue=False,
     verbose=True,
     use_progress_bar=False,
     print_every=100,
 )
 ```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `hladat` | `HLAdata` | Loaded HLA genotype object. The block selected by `kind` must already be loaded. Use `read_plink()` or another genotype loader, such as `read_bgl()`. |
-| `config` | `hp.stats.StandardConfig` | Model type and parallel execution settings; see below. |
-| `kind` | `"AA"`, `"HLA"` or `"SNP"` | Required. Selects the genotype block to analyse. AA tests group markers by amino acid position; HLA and SNP tests use their corresponding variant IDs. |
-| `famfile` | `pandas.DataFrame` or `None` | Optional FAM table containing `IID` and, if `y` is omitted, `PHENO`. Required when `y` is an unindexed array. |
-| `covar` | `pandas.DataFrame`, `str`, `Path` or `None` | Optional IID-indexed covariates. A path is read as comma-separated CSV with the first column as the index. Load whitespace-delimited files with pandas first. All supplied covariate columns enter the model. |
-| `y` | `pandas.Series`, one-dimensional array-like or `None` | Phenotype. A Series must be indexed by IID. Arrays follow FAM row order. If omitted, use `famfile["PHENO"]`. |
-| `variant_filter` | callable or `None` | Function receiving a variant context dictionary and returning `True` to keep or `False` to exclude the variant. Use the supplied filter helpers for lists of IDs or genes; see below. |
-| `residue` | `bool`, default `False` | For AA analysis, retain the position-level test and append individual residue one-vs-rest tests, including the reference residue when its dosage is available and passes QC. |
-| `condition_on` | `str`, sequence of strings or `None` | Variant IDs from the same selected genotype block to include as adjustment covariates. Conditioning variants are excluded from testing. For AA, supply position IDs without residue suffixes. |
-| `verbose` | `bool`, default `True` | Print scheduled variant counts, execution settings, progress and timing. |
-| `use_progress_bar` | `bool`, default `False` | Use a tqdm progress bar when available and `verbose=True`; otherwise use periodic progress messages. |
-| `print_every` | `int`, default `100` | Number of completed variants between periodic progress messages. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `hladat` | `HLAdata` | **Required** | Loaded genotype object. The block selected by `kind` must already be loaded. |
+| `config` | `hp.stats.StandardConfig` | **Required** | Model type and parallel execution settings; see below. |
+| `kind` | `str` | **Required** | Loaded genotype block: `"AA"`, `"HLA"` or `"SNP"`. |
+| `famfile` | `pandas.DataFrame` or `None` | `None` | Sample table containing `IID` and, when `y` is omitted, `PHENO`. Required when `y` is an unindexed array. |
+| `covar` | `pandas.DataFrame`, `str`, `pathlib.Path` or `None` | `None` | IID-indexed covariates, or a comma-separated CSV path with sample IDs in its first column. Read other delimiters explicitly with pandas. All supplied covariate columns enter the model. |
+| `y` | `pandas.Series`, one-dimensional array-like or `None` | `None` | Phenotype Series indexed by IID, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
+| `variant_filter` | callable or `None` | `None` | Function receiving a variant context and returning `True` to keep or `False` to exclude it. Use ID/gene filter helpers rather than a bare list. |
+| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind focal variant IDs included as adjustment terms. Conditioning variants are excluded from focal testing. For AA, use position IDs without residue suffixes. |
+| `residue` | `bool` | `False` | For `kind="AA"`, retain position-level results and append residue OVR tests, including an available QC-passing reference dosage. |
+| `verbose` | `bool` | `True` | Print execution settings, task counts, progress and timing. |
+| `use_progress_bar` | `bool` | `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
+| `print_every` | `int` | `100` | Completed analysis tasks between periodic progress messages. |
 
 ### `StandardConfig`
 
@@ -131,13 +132,13 @@ config = hp.stats.StandardConfig(
 )
 ```
 
-| Parameter | Type | Description |
-|---|---|---|
-| `model_type` | `"logit"` or `"linear"` | Required. Logistic regression for binary outcomes, or ordinary least squares for continuous outcomes. |
-| `n_jobs` | `int`, default `1` | Number of workers. Use 1 for sequential execution. |
-| `backend` | `"process"` or `"thread"`, default `"process"` | Parallel execution method. Used when `n_jobs > 1`. |
-| `batch_size` | `int`, default `32` | Variants submitted in each batch. Larger batches reduce scheduling overhead but can make work distribution less even. |
-| `chunksize` | `int`, default `8` | Maximum number of batch futures in flight; this is not the number of variants in a batch. |
+| Parameter | Type | Default | Description |
+|---|---|---|---|
+| `model_type` | `str` | **Required** | `"logit"` for binary outcomes or `"linear"` for continuous outcomes. |
+| `n_jobs` | `int` | `1` | Number of workers. Use `1` for sequential execution. |
+| `backend` | `str` | `"process"` | Parallel backend: `"process"` or `"thread"`. Used when `n_jobs > 1`. |
+| `batch_size` | `int` | `32` | Number of analysis tasks per submitted batch. |
+| `chunksize` | `int` | `8` | Maximum number of batch futures in flight, not the number of tasks per batch. |
 
 ## Phenotypes, covariates and sample IDs
 
