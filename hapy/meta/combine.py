@@ -166,7 +166,7 @@ def stouffers_meta_studies(studies: List[pd.DataFrame], pval: str,
         raise ValueError("All p-values must be finite.")
     if np.any((pvalues <= 0) | (pvalues > 1)):
         raise ValueError("All p-values must be in the interval (0, 1].")
-    combined["_z"] = stats.norm.isf(pvalues)
+#    combined["_z"] = stats.norm.isf(pvalues)
     combined["_w"] = _stouffer_weights(combined)
     rows = []
     for variant, group in combined.groupby(variant_col, sort=False):
@@ -175,9 +175,14 @@ def stouffers_meta_studies(studies: List[pd.DataFrame], pval: str,
         weights = group["_w"].to_numpy(dtype=float)
         # Scaling preserves relative weights and avoids squaring huge counts.
         weights = weights / weights.max()
-        z_meta = float(np.dot(weights, group["_z"].to_numpy(dtype=float))
-                       / np.linalg.norm(weights))
-        p_meta = float(stats.norm.sf(z_meta))
+        result = stats.combine_pvalues(
+            group[pval].to_numpy(dtype=float),
+            method="stouffer",
+            weights=weights,
+        )
+
+        z_meta = float(result.statistic)
+        p_meta = float(result.pvalue)
         log_p = float(stats.norm.logsf(z_meta) / np.log(10.0))
         rows.append({
             variant_col: variant, "N studies": len(group),
