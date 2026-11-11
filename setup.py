@@ -1,5 +1,5 @@
 """
-Install instructions for HaPy
+Install instructions for hapy
 """
 import os
 from setuptools import find_packages, setup

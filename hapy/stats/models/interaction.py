@@ -9,11 +9,11 @@ This module provides two interaction testing helpers used by the interaction run
      (a) Wald test p-value for the interaction coefficient only (fast; default), or
      (b) likelihood-ratio / ANOVA-style nested model comparison (slower; optional).
 
-2) Block omnibus interaction (anchor column × multi-column block)
+2) Block omnibus interaction (partner column × multi-column block)
    - Intended for AA-position encodings where a "variant" expands into many columns.
-   - Fits a model with main effects for anchor + all block columns, and compares:
-       null: Y ~ covars + anchor + block_cols
-        alt: Y ~ covars + anchor + block_cols + (anchor:block_cols)
+   - Fits a model with main effects for partner + all block columns, and compares:
+       null: Y ~ covars + partner + block_cols
+        alt: Y ~ covars + partner + block_cols + (partner:block_cols)
    - Returns P-value, Statistic, DoF and INFO for the omnibus interaction test.
 
 Notes on categorical variables
@@ -45,7 +45,7 @@ def _failed_result(info: str, *, omnibus: bool = False) -> dict:
     """Retain missing statistics and a reason when an interaction fit is unusable."""
     columns = ("P-value", "Statistic", "DoF") if omnibus else (
         "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper",
-        "Variant_p", "Variant_Beta", "Anchor_p", "Anchor_Beta",
+        "Variant_p", "Variant_Beta", "Partner_p", "Partner_Beta",
     )
     result = dict.fromkeys(columns, np.nan)
     result["INFO"] = info
@@ -138,7 +138,7 @@ def fit_pairwise_interaction(
     -------
     dict
         P-value, Statistic, Beta, StdErr, CI-lower and CI-upper describe the
-        interaction coefficient. Variant_p/Variant_Beta and Anchor_p/Anchor_Beta
+        interaction coefficient. Variant_p/Variant_Beta and Partner_p/Partner_Beta
         are main-effect estimates from the full model. INFO is NaN when fit
         checks pass; otherwise estimates are missing and INFO gives a reason.
         compute_lrt=True additionally returns LR_p and Anova_p comparisons.
@@ -177,8 +177,8 @@ def fit_pairwise_interaction(
         "CI-upper": float(ci.iloc[1]),
         "Variant_p": float(alt.pvalues[a_t]),
         "Variant_Beta": float(alt.params[a_t]),
-        "Anchor_p": float(alt.pvalues[b_t]),
-        "Anchor_Beta": float(alt.params[b_t]),
+        "Partner_p": float(alt.pvalues[b_t]),
+        "Partner_Beta": float(alt.params[b_t]),
         "INFO": np.nan,
     }
 
@@ -193,13 +193,13 @@ def fit_pairwise_interaction(
 
 def fit_block_omnibus_interaction(
     abt: pd.DataFrame,
-    anchor_col: str,
+    partner_col: str,
     block_cols: list[str],
     baseline_covars: list[str],
     model_type: str,
 ) -> dict:
     """
-    Fit an omnibus interaction model: anchor × block.
+    Fit an omnibus interaction model: partner × block.
 
     Both null and full models must pass convergence/finiteness checks. Failed
     checks return missing statistics and an INFO reason identifying the model.
@@ -210,15 +210,15 @@ def fit_block_omnibus_interaction(
 
     Model
     -----
-    null: Y ~ covars + anchor + block_cols
-     alt: Y ~ covars + anchor + block_cols + (anchor:block_cols)
+    null: Y ~ covars + partner + block_cols
+     alt: Y ~ covars + partner + block_cols + (partner:block_cols)
 
     Parameters
     ----------
     abt:
-        Analysis-by-table containing Y, anchor_col, block_cols, and baseline covariates.
-    anchor_col:
-        Column name for the anchor predictor.
+        Analysis-by-table containing Y, partner_col, block_cols, and baseline covariates.
+    partner_col:
+        Column name for the partner predictor.
     block_cols:
         List of column names representing the block.
     baseline_covars:
@@ -233,13 +233,13 @@ def fit_block_omnibus_interaction(
         statistics and a reason; successful fits have INFO set to NaN.
     """
     cov_terms = _terms(abt, baseline_covars)
-    anchor_t = _term(abt, anchor_col)
+    partner_t = _term(abt, partner_col)
     block_terms = _terms(abt, block_cols)
 
-    null_terms = cov_terms + [anchor_t] + block_terms
+    null_terms = cov_terms + [partner_t] + block_terms
     nullf = "Y ~ " + " + ".join(null_terms) if null_terms else "Y ~ 1"
 
-    interaction_terms = [f"{anchor_t}:{bt}" for bt in block_terms]
+    interaction_terms = [f"{partner_t}:{bt}" for bt in block_terms]
     altf = nullf + (" + " + " + ".join(interaction_terms) if interaction_terms else "")
 
     alt = _fit(altf, abt, model_type)
@@ -262,9 +262,9 @@ def fit_block_omnibus_interaction(
     for name in alt.params.index:
         if ":" not in name:
             continue
-        has_anchor = anchor_t in name
+        has_partner = partner_t in name
         has_block = any(bt in name for bt in block_terms)
-        if has_anchor and has_block:
+        if has_partner and has_block:
             present.append(name)
 
     out: dict = {

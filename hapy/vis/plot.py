@@ -548,7 +548,7 @@ def plot_aa_association(data, *, variant_col='VARIANT', pval_col=None, log10p_co
         Defaults include dpi=dpi and bbox_inches='tight'; supplied keys override.
     show : bool, default False
         Call matplotlib.pyplot.show() after optional saving. False supports
-        headless use; set MPLBACKEND=Agg before importing HAPY where required.
+        headless use; set MPLBACKEND=Agg before importing hapy where required.
     p_digits : int, default 3
         Positive number of significant figures in annotated actual P-values.
 
@@ -643,7 +643,7 @@ def plot_aa_interaction(data, *, variant_col='AA_VARIANT', partner_pos_col=None,
         original frame is not modified. Distinct observations at the same genomic
         coordinate pair are preserved by default.
     variant_col : str, default 'AA_VARIANT'
-        HLA position ID column, e.g. 'AA_DRB1_11_32552129'. For HAPY meta-analysis,
+        HLA position ID column, e.g. 'AA_DRB1_11_32552129'. For hapy meta-analysis,
         variant_col='INTERACTION' also accepts 'AA_DRB1_11_32552129*partner':
         the AA part before '*' is parsed automatically.
     partner_pos_col : str or None, default None
@@ -828,7 +828,7 @@ def plot_aa_interaction(data, *, variant_col='AA_VARIANT', partner_pos_col=None,
         Defaults include dpi=dpi and bbox_inches='tight'; supplied keys override.
     show : bool, default False
         Call matplotlib.pyplot.show() after optional saving. False supports
-        headless use; set MPLBACKEND=Agg before importing HAPY where required.
+        headless use; set MPLBACKEND=Agg before importing hapy where required.
     p_digits : int, default 3
         Positive number of significant figures in annotated actual P-values.
 

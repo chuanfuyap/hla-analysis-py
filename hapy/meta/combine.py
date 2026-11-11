@@ -114,7 +114,7 @@ def _stouffer_weights(combined):
         effective_n = 4.0 / (1.0 / cases.loc[binary] + 1.0 / controls.loc[binary])
         weights.loc[binary] = np.sqrt(effective_n)
 
-    # Prefer the actual modelling sample size. N_total also supports HAPY
+    # Prefer the actual modelling sample size. N_total also supports hapy
     # outputs where N_used was omitted because all samples were used.
     sample_n = pd.Series(np.nan, index=combined.index)
     for column in ("N_used", "N", "N_total"):

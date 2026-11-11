@@ -30,7 +30,13 @@ def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame | 
     """Split AA results into univariate IVW and omnibus Stouffer inputs."""
     study = study.copy()
     if interaction:
-        study["INTERACTION"] = study["AA_VARIANT"] + "*" + study["Anchor_col"]
+        variant_col = "VARIANT" if "VARIANT" in study else "AA_VARIANT"
+        partner_col = "Partner_col" if "Partner_col" in study else "Anchor_col"
+        study["INTERACTION"] = study[variant_col].astype(str) + "*" + study[partner_col].astype(str)
+        if "LR_p" not in study and "P-value" in study:
+            if "Beta" in study:
+                raise ValueError("AA interaction meta-analysis expects position-level omnibus results, not pairwise coefficients.")
+            study["LR_p"] = study["P-value"]
     lr_p = study.get("LR_p", pd.Series(float("nan"), index=study.index))
     omnibus = study[lr_p.notnull()].copy()
     if interaction:
@@ -45,12 +51,13 @@ def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFra
     """HLA and SNP results: IVW only, derive SE from CI."""
     if interaction:
         study = study.copy()
-        if {"VARIANT", "Anchor_col"}.issubset(study.columns):
+        partner_col = "Partner_col" if "Partner_col" in study else "Anchor_col"
+        if {"VARIANT", partner_col}.issubset(study.columns):
             identifier = study["VARIANT"].astype(str)
             if "Variant_col" in study:
                 encoded = study["Variant_col"]
                 identifier = identifier.where(encoded.isna(), identifier + ":" + encoded.fillna("").astype(str))
-            study["INTERACTION"] = identifier + "*" + study["Anchor_col"].astype(str)
+            study["INTERACTION"] = identifier + "*" + study[partner_col].astype(str)
             # Keep the existing meta engine compatible with both export schemas.
             for source, target in (("Beta", "I_coef"), ("StdErr", "I_StdErr"),
                                    ("CI-lower", "I_CI_0.025"), ("CI-upper", "I_CI_0.975")):

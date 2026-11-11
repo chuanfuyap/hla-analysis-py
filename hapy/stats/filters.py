@@ -3,20 +3,18 @@ Reusable filters for standard and interaction analyses.
 
 Filter contexts
 ---------------
-Standard / single-variant filters receive VariantCtx:
+Variant filters receive VariantCtx (also used by interaction variant_filter):
   {
     "analysis": "standard",
     "kind": "AA"|"HLA"|"SNP",
     "variant_id": "<variant id>",
     "meta": {...},
     "geno_cols": [...]
-  }
-
-Interaction filters receive PairCtx:
+Interaction pair_filter callbacks receive PairCtx:
   {
     "analysis": "interaction",
-    "a_kind": "...",
-    "b_kind": "...",
+    "kind": "...",
+    "partner_kind": "...",
     "a_id": "...",
     "b_id": "...",
     "a_meta": {...},
@@ -25,7 +23,7 @@ Interaction filters receive PairCtx:
     "a_col": "...",
     "b_col": "..."
     # or (omnibus):
-    "anchor_col": "...",
+    "partner_col": "...",
     "block_cols": [...]
   }
 
@@ -37,6 +35,7 @@ from typing import Any, Callable, Iterable, TypedDict, NotRequired
 
 
 class VariantCtx(TypedDict):
+    side: NotRequired[str]
     analysis: str
     kind: str
     variant_id: str
@@ -46,15 +45,15 @@ class VariantCtx(TypedDict):
 
 class PairCtx(TypedDict):
     analysis: str
-    a_kind: str
-    b_kind: str
+    kind: str
+    partner_kind: str
     a_id: str
     b_id: str
     a_meta: dict[str, Any]
     b_meta: dict[str, Any]
     a_col: NotRequired[str]
     b_col: NotRequired[str]
-    anchor_col: NotRequired[str]
+    partner_col: NotRequired[str]
     block_cols: NotRequired[list[str]]
 
 
@@ -174,11 +173,11 @@ def only_variants_pair(
 
     def _f(ctx: PairCtx) -> bool:
         if aa is not None:
-            k = _key(ctx["a_kind"], ctx["a_id"], ctx.get("a_meta", {}) or {})
+            k = _key(ctx["kind"], ctx["a_id"], ctx.get("a_meta", {}) or {})
             if k is None or k not in aa:
                 return False
         if bb is not None:
-            k = _key(ctx["b_kind"], ctx["b_id"], ctx.get("b_meta", {}) or {})
+            k = _key(ctx["partner_kind"], ctx["b_id"], ctx.get("b_meta", {}) or {})
             if k is None or k not in bb:
                 return False
         return True

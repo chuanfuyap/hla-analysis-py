@@ -14,8 +14,8 @@ test an AA position jointly against each partner predictor. Use
 
 ## G×G example: AA positions and external genotypes
 
-Partner genotype data can be read into a pandas DataFrame with `hp.read_genotype()` 
-and passed to the interaction analysis via `b_kind=DF` option.
+Partner genotype data can be read into a pandas DataFrame with `hp.read_genotype()`
+and passed to the interaction analysis via `partner_kind="DF"` option.
 The reader supports PLINK PGEN, BED/BIM/FAM and RAW files; see
 [Reading PLINK genotype data](genotype_dataframe.md) for formats, allele counting,
 variant selection and RAW column naming.
@@ -37,9 +37,9 @@ config = hp.stats.InteractionConfig(
 results = hp.stats.interaction(
     hladat,
     config,
-    a_kind="AA",
-    b_kind="DF",
-    block_b_df=partners,
+    kind="AA",
+    partner_kind="DF",
+    partner_data=partners,
     y=phenotype,
     covar=covar,
 )
@@ -51,22 +51,28 @@ be loaded in `hladat`; see [Association analysis](association.md) for loading AA
 data and preparing phenotypes and covariates. For RAW or bfile partners, change
 `format` in `read_genotype()` accordingly.
 
-Each column in `partners` is tested as an anchor against each eligible AA
-position. This compares models with and without the anchor-by-AA interaction
+Each column in `partners` is tested as an partner against each eligible AA
+position. This compares models with and without the partner-by-AA interaction
 terms, while retaining both main effects. It does not combine separate
 association P-values.
 
-## Choosing the blocks
+## Interaction naming
+
+Use `kind` for the focal HLA genotype block and `partner_kind` for the interacting
+block. 
+
+
+### Choosing the blocks
 
 | Parameter | Options | Meaning |
 |---|---|---|
-| `a_kind` | `"AA"`, `"HLA"`, `"SNP"` | Loaded genotype block in `hladat`. |
-| `b_kind` | `"AA"`, `"HLA"`, `"SNP"` | Another loaded genotype block in `hladat`. |
-| `b_kind="DF"` | `block_b_df` required | External IID-indexed predictor DataFrame, including output from `read_genotype()`. |
-| `b_kind="COV"` | `covar` and `cov_block_cols` required | Selected covariate columns are the interacting B predictors. |
+| `kind` | `"AA"`, `"HLA"`, `"SNP"` | Loaded genotype block in `hladat`. |
+| `partner_kind` | `"AA"`, `"HLA"`, `"SNP"` | Another loaded genotype block in `hladat`. |
+| `partner_kind="DF"` | `partner_data` required | External IID-indexed predictor DataFrame, this includes output from `read_genotype()`. |
+| `partner_kind="COV"` | `covar` and `cov_block_cols` required | Selected covariate columns from the covariate DataFrame are the interacting predictors. |
 
-`hladat` stores the HLA/AA genotype data. A partner DataFrame is separate from
-that object: it must be supplied as `block_b_df`, not as `hladat`.
+`hladat` stores the HLA genotype data. A partner DataFrame is separate from
+that object: it must be supplied as `partner_data`, not as `hladat`.
 
 ## Interaction modes
 
@@ -87,30 +93,25 @@ is a two-sided t-test. `Beta` is the signed interaction coefficient.
 ```python
 config = hp.stats.InteractionConfig(model_type="logit", mode="pairwise")
 pairwise = hp.stats.interaction(
-    hladat, config, a_kind="AA", b_kind="DF",
-    block_b_df=partners, y=phenotype, covar=covar,
+    hladat, config, kind="AA", partner_kind="DF",
+    partner_data=partners, y=phenotype, covar=covar,
 )
 ```
 
 ### `mode="one_vs_block_omnibus"`
 
-At least one side must be `"AA"`. One side contributes an AA-position genotype
-block and the other contributes one anchor column:
+`kind` must be `"AA"`.
 
 ```text
-Null model: Y ~ baseline covariates + anchor + AA block
-Full model: Y ~ baseline covariates + anchor + AA block
-               + anchor:AA_column_1 + anchor:AA_column_2 + ...
+Null model: Y ~ baseline covariates + partner + AA block
+Full model: Y ~ baseline covariates + partner + AA block
+               + partner:AA_column_1 + partner:AA_column_2 + ...
 ```
 
 The likelihood-ratio test compares the full and null models on the same
 complete-case samples. `LR_p` tests the interaction terms jointly; it does not
-test the AA or anchor main effect. A one-column AA block is also eligible.
+test the AA or partner main effect. A one-column AA block is also eligible.
 
-If only A is AA, A is the block and B supplies anchors. If only B is AA, B is
-the block and A supplies anchors. If both sides are AA, B is the block and each
-A column is an anchor. AA–AA in this mode is therefore a column-by-position
-block test, not one joint test of every interaction between two entire blocks.
 
 Predictor names must be distinct across the interacting columns and covariates.
 This also matters for AA–AA data where different positions can have identically
@@ -123,15 +124,16 @@ ensure distinct model-column names.
 results = hp.stats.interaction(
     hladat,
     config,
-    a_kind="AA",
-    b_kind="DF",
+    kind="AA",
+    partner_kind="DF",
     famfile=None,
     covar=None,
     y=None,
+    variant_filter=None,
     pair_filter=None,
     cov_block_cols=None,
     baseline_covar_cols=None,
-    block_b_df=partners,
+    partner_data=partners,
     condition_on_a=None,
     verbose=True,
     use_progress_bar=False,
@@ -141,16 +143,17 @@ results = hp.stats.interaction(
 
 | Parameter | Type | Description |
 |---|---|---|
-| `hladat` | `HLAdata` | Genotype object containing A and, when applicable, B genotype blocks. |
+| `hladat` | `HLAdata` | Genotype object containing HLA genotype information |
 | `config` | `hp.stats.InteractionConfig` | Model, interaction mode and parallel settings. |
-| `a_kind`, `b_kind` | `str` | Required block types; see the block table above. |
+| `kind`, `partner_kind` | `str` | Required block types; see the block table above. |
 | `famfile` | `pandas.DataFrame` or `None` | Optional FAM table with `IID`, and `PHENO` when `y` is omitted. Required for an unindexed phenotype array. |
-| `covar` | `pandas.DataFrame`, `str`, `Path` or `None` | IID-indexed covariates, or a CSV path with sample IDs in the first column. Load whitespace-delimited files explicitly with pandas. Required for `b_kind="COV"`. |
+| `covar` | `pandas.DataFrame`, `str`, `Path` or `None` | IID-indexed covariates, or a CSV path with sample IDs in the first column. Load whitespace-delimited files explicitly with pandas. Required for `partner_kind="COV"`. |
 | `y` | `pandas.Series`, one-dimensional array-like or `None` | IID-indexed phenotype Series, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
+| `variant_filter` | callable or `None` | Select HLA-side variants by ID or reader metadata before genotype blocks are constructed. Reuse the standard variant/gene filter helpers. Does not filter partner-side predictors or conditioning adjustment terms. You can filter partner side with the pandas indexing. |
 | `pair_filter` | callable or `None` | Function receiving a candidate interaction context and returning `True` to keep or `False` to exclude it. See examples below. |
-| `cov_block_cols` | list of strings or `None` | Covariate columns to test as B predictors. Required for `b_kind="COV"`; do not pass for `b_kind="DF"`. |
-| `baseline_covar_cols` | list of strings or `None` | Covariate columns always included as adjustment terms. By default, all covariates are used, except the tested B covariates when `b_kind="COV"`. `[]` selects no baseline covariates. |
-| `block_b_df` | `pandas.DataFrame` or `None` | Required for `b_kind="DF"`. Rows are sample IIDs and columns are partner predictors. Use numeric dosages or explicitly numeric indicators. |
+| `cov_block_cols` | list of strings or `None` | Covariate columns to test as predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
+| `baseline_covar_cols` | list of strings or `None` | Covariate columns always included as adjustment terms. By default, all covariates are used, except the tested covariates when `partner_kind="COV"`. `[]` selects no baseline covariates. |
+| `partner_data` | `pandas.DataFrame` or `None` | Required for `partner_kind="DF"`. Rows are sample IIDs and columns are partner predictors. Use numeric dosages or explicitly numeric indicators. |
 | `condition_on_a` | `str`, sequence of strings or `None` | Same-kind A-side variant IDs added as adjustment terms. Tasks testing a listed A variant are excluded. |
 | `verbose` | `bool`, default `True` | Print scheduled task counts, execution settings, progress and timing. |
 | `use_progress_bar` | `bool`, default `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
@@ -167,8 +170,7 @@ results = hp.stats.interaction(
 | `batch_size` | `int`, default `32` | Interaction tasks submitted in each batch. |
 | `chunksize` | `int`, default `8` | Maximum number of batch futures in flight. |
 
-Process workers require importable callbacks and an `if __name__ == "__main__":`
-script guard. More workers do not guarantee faster execution.
+Process execution requires an `if __name__ == "__main__":` script guard.
 
 ## Samples and covariates
 
@@ -198,7 +200,7 @@ differ between interaction tests. `hapy` does not impute these missing values.
 
 ## Interacting with a covariate: AA positions × SEX
 
-Use `b_kind="COV"` to test AA positions against columns already in your covariate
+Use `partner_kind="COV"` to test AA positions against columns already in your covariate
 table. `cov_block_cols` selects the interacting columns; all other covariates
 are baseline adjustment terms by default. There is no need to create a separate
 partner DataFrame.
@@ -216,8 +218,8 @@ config = hp.stats.InteractionConfig(
 results = hp.stats.interaction(
     hladat,
     config,
-    a_kind="AA",
-    b_kind="COV",
+    kind="AA",
+    partner_kind="COV",
     covar=covar,
     y=pheno[2],
     cov_block_cols=["SEX"], # must be passed as a list
@@ -238,7 +240,7 @@ Full: Y ~ other covariates + SEX + AA block + SEX:AA_column_1 + ...
 
 For a binary SEX predictor, numeric 0/1 coding is convenient. Binary categorical
 SEX is also supported in the omnibus mode shown above. No assumption about
-which code represents which sex is made by the interaction function. 
+which code represents which sex is made by the interaction function.
 
 For `mode="pairwise"`, use numeric interacting predictors, such as a 0/1 binary
 indicator. Categorical predictors expand into formula coefficients that the
@@ -249,20 +251,15 @@ still be categorical in either mode.
 
 ```python
 results = hp.stats.interaction(
-    hladat, config, a_kind="AA", b_kind="COV",
+    hladat, config, kind="AA", partner_kind="COV",
     covar=covar, y=ra[2],
     cov_block_cols=["SEX", "exposure"],
 )
 ```
 
-This schedules a separate anchor-by-AA-block test for each listed covariate.
-It does not jointly test SEX and exposure as one interaction block. All selected
-columns are removed from the baseline table, so SEX tests do not automatically
-adjust for exposure, or vice versa. Other non-selected covariates remain
-baseline adjustment terms by default.
 
 Use `baseline_covar_cols` to name the desired baseline terms explicitly, for
-example `["age", "PC1", "PC2"]`. Do not add the tested anchor to that list: its
+example `["age", "PC1", "PC2"]`. Do not add the tested partner to that list: its
 main effect is already included. To avoid unrelated missing-value exclusions,
 pass a covariate table containing the selected interacting predictors and the
 adjustment columns you need.
@@ -270,9 +267,38 @@ adjustment columns you need.
 Conditioning with `condition_on_a` works with covariate interactions too; those
 genotype columns enter as additional baseline adjustment terms. Covariate B
 blocks are identified as `COV_BLOCK` in filter contexts; select a particular
-exposure using `anchor_col` in omnibus mode or `b_col` in pairwise mode.
+exposure using `partner_col` in omnibus mode or `b_col` in pairwise mode.
 
 ## Selecting interaction tests
+
+### Filter HLA variants before constructing genotype blocks
+
+Use `variant_filter` to select HLA-side positions, alleles or SNPs before their
+genotype matrices are built. This avoids preparing excluded variants.
+
+```python
+variant_filter = hp.stats.filters.only_genes_variant(["DRB1", "DQB1"])
+filtered = hp.stats.interaction(
+    hladat, config, kind="AA", partner_kind="COV",
+    covar=covar, cov_block_cols=["SEX"], y=phenotype,
+    variant_filter=variant_filter,
+)
+```
+
+Or select exact position IDs:
+
+```python
+variant_filter = hp.stats.filters.only_variants_variant([
+    "AA_DRB1_11_32552129",
+    "AA_DRB1_13_32552123",
+])
+```
+
+Pass the helper result as `variant_filter`, not a bare list. Use IDs present
+in your loaded data. Gene selection uses reader metadata, so no genotype block
+is needed to identify the gene.
+
+### Select individual interactions after constructing blocks
 
 `pair_filter` selects tests after the genotype blocks have been built. For
 external genotypes, use `read_genotype(..., variants=[...])` first to reduce
@@ -283,40 +309,34 @@ For example, select AA genes on A:
 ```python
 pair_filter = hp.stats.filters.only_genes_pair(genes_a=["DRB1", "DQB1"])
 filtered = hp.stats.interaction(
-    hladat, config, a_kind="AA", b_kind="DF",
-    block_b_df=partners, y=phenotype, covar=covar,
+    hladat, config, kind="AA", partner_kind="DF",
+    partner_data=partners, y=phenotype, covar=covar,
     pair_filter=pair_filter,
 )
 ```
 
-A custom omnibus filter can select an AA position and external anchor:
+A custom omnibus filter can select an AA position and external partner:
 
 ```python
 def selected_interaction(ctx):
     return (
         ctx["a_id"] == "AA_DRB1_11_32552129"
-        and ctx["anchor_col"] == "rs1"
+        and ctx["partner_col"] == "rs1"
     )
 
 filtered = hp.stats.interaction(
-    hladat, config, a_kind="AA", b_kind="DF",
-    block_b_df=partners, y=phenotype, covar=covar,
+    hladat, config, kind="AA", partner_kind="DF",
+    partner_data=partners, y=phenotype, covar=covar,
     pair_filter=selected_interaction,
 )
 ```
-
-Use IDs present in your data. Context keys common to both modes are `analysis`,
-`a_kind`, `b_kind`, `a_id`, `b_id`, `a_meta` and `b_meta`. Pairwise mode adds
-`a_col` and `b_col`; omnibus mode adds `anchor_col` and `block_cols`. With external
-B data, `b_id` is `DF_BLOCK`; select a particular partner using `b_col` or
-`anchor_col`, not `b_id`. For covariate B data, `b_id` is `COV_BLOCK`.
 
 ## Conditional interaction analysis
 
 ```python
 conditional = hp.stats.interaction(
-    hladat, config, a_kind="AA", b_kind="DF",
-    block_b_df=partners, y=phenotype, covar=covar,
+    hladat, config, kind="AA", partner_kind="DF",
+    partner_data=partners, y=phenotype, covar=covar,
     condition_on_a="AA_DRB1_231_32548054",
 )
 ```
@@ -341,9 +361,9 @@ output. The model creates these fields directly:
 | `P-value`, `Statistic` | Interaction coefficient test P-value and t-statistic (linear) or Wald z-statistic (logistic). |
 | `Beta`, `StdErr`, `CI-lower`, `CI-upper` | Interaction coefficient, standard error and 95% confidence interval. Logistic estimates are on the log-odds scale. |
 | `Variant_p`, `Variant_Beta` | Focal variant main-effect P-value and coefficient from the full interaction model. |
-| `Anchor_p`, `Anchor_Beta` | Anchor* main-effect P-value and coefficient from the full interaction model. |
+| `Partner_p`, `Partner_Beta` | Partner* main-effect P-value and coefficient from the full interaction model. |
 
-Anchor refers to the component (either genetic or environment) interacting with HLA variant being analysed. 
+Partner refers to the component (either genetic or environment) interacting with HLA variant being analysed.
 
 ## Saving and plotting
 

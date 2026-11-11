@@ -68,17 +68,15 @@ config = hp.stats.InteractionConfig(
 results = hp.interaction(
     hladat,
     config,
-    a_kind="AA",
-    b_kind="DF",
-    block_b_df=partners,
+    kind="AA",
+    partner_kind="DF",
+    partner_data=partners,
     y=phenotype,
     covar=covar,
 )
 ```
 
-This uses each partner column as an anchor for an AA-block omnibus interaction.
-For individual genotype-column interactions use `mode="pairwise"` instead.
-HAPY aligns the partner matrix to phenotype sample IDs; missing required values
+hapy aligns the partner matrix to phenotype sample IDs; missing required values
 are handled by the existing interaction analysis complete-case processing.
 
 The returned DataFrame is dense. For large filesets, select the partner variants

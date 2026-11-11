@@ -1,4 +1,4 @@
-"""Read PLINK text and binary filesets into HAPY dosage matrices."""
+"""Read PLINK text and binary filesets into hapy dosage matrices."""
 
 from pathlib import Path
 from typing import Literal
@@ -262,7 +262,7 @@ def read_genotype(
         _COUNTED_ALLELE suffix removed (e.g. rs123_A becomes rs123); everything
         before the final underscore is preserved. PGEN/bfile IDs are unchanged.
         Explicit variants sets column order.
-        Use as block_b_df with b_kind="DF" in interaction analysis.
+        Use as partner_data with partner_kind="DF" in interaction analysis.
 
     Notes
     -----
