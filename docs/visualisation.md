@@ -47,7 +47,8 @@ For example, add one of these configurations to either plotting function:
 
 ```python
 # Numeric sequence positions within HLA-DRB1 (the default axis).
-x_axis="amino_acid", genes="DRB1"
+x_axis = "amino_acid"
+genes = "DRB1"
 ```
 
 ![HLA-DRB1 association plotted by amino acid sequence position](images/aminoacid_gene.png)

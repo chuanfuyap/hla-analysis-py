@@ -4,7 +4,7 @@
 or SNP block of an `HLAdata` object. It returns a pandas DataFrame; results are
 not saved automatically.
 
-Omnibus tests reuse compatible baseline null models. See [null-model reuse](null_model_reuse.md) for validation rules, benchmarks and limitations.
+Omnibus tests reuse compatible baseline null models. Different complete-case samples or baseline designs trigger a local null fit.
 
 This page focuses on amino acid position tests with `kind="AA"`. Input rows can
 represent individual residues or residue encodings, but `hapy` groups them into

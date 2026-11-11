@@ -150,9 +150,9 @@ or position, using its existing QC and reference selection.
   Report the omnibus partial-likelihood-ratio P-value for the genotype block.
 
 Both models in an omnibus comparison use the same subjects and survival
-observations. Compatible null summaries can be reused across positions; see
-[null-model reuse](null_model_reuse.md). This optimisation does not change the
-test or complete-case rules.
+observations. Compatible null summaries can be reused across positions; differing survival
+observations or baseline designs trigger a local null fit. This optimisation
+does not change the test or complete-case rules.
 
 ## Samples and missing information
 
