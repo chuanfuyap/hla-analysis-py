@@ -382,3 +382,28 @@ plots, see [Visualisation](visualisation.md). Supply the omnibus AA ID column
 (`VARIANT`) and the appropriate partner identifiers or genomic coordinates.
 External partner IDs such as `rs1` do not themselves provide genomic positions;
 supply a position column when an ID cannot be parsed.
+
+
+## Optional reference-residue interactions
+
+For `kind=AA`, you can set `residue=True` in `config.mode="pairwise"` to include the QC-passing reference residue as well, without duplicating the existing tests. 
+
+```python
+results = hp.stats.interaction(
+    hladat, hp.stats.InteractionConfig(model_type="logit", mode="pairwise", n_jobs=4),
+    kind="AA", partner_kind="DF", partner_data=genotypes,
+    y=phenotype, covar=covar, residue=True,
+)
+```
+
+The existing model remains `Y ~ covariates + residue + partner + residue:partner`. The option requires `config.mode="pairwise"` and AA on at least one side; other modes raise `ValueError`. `condition_on`, variant/pair filtering and parallel execution remain available. Position-pair tasks keep related residue contrasts together within the existing workers. When all relevant genotype columns share a missingness pattern, their tests reuse one ABT; differing patterns retain per-combination complete-case filtering.
+
+No `TEST` column or other new output column is added. Additional reference tests annotate the relevant `Ref_AA` field (or `Partner_Ref_AA` when AA is the partner), for example `tested: S`. `Amino_Acids` keeps its existing list. The field identifies only the tested residue; the comparison is against all other residues.
+
+For complementary biallelic dosages `D_B = 2 - D_A`, an eligible existing fit can be reused. Reversing the variant residue negates its main-effect coefficient and the interaction coefficient, and changes the partner main-effect coefficient to `old_partner_beta + 2 * old_interaction_beta`. The partner main-effect P-value is recalculated using the fitted covariance, rather than copied. Reversing the AA partner applies the corresponding transformation to the other main effect. Reversing both AA sides applies both transformations. Confidence intervals and signed interaction statistics are transformed consistently.
+
+Reuse requires complementary dosages on identical complete-case samples and a supported full-rank intercept design. If those checks fail, the existing pairwise fitter explicitly tests the retained reference dosage. Fitted models stay inside their worker; they are not included in output or transferred between workers.
+
+AA frequencies now use each interaction's final complete-case model samples, also with `residue=False` and in block omnibus mode. Additional reference-residue rows report the tested residue frequency using the existing `AA_AF`/`Partner_AA_AF` convention; `Partner_AF` remains the selected genotype partner's numeric frequency. Residue QC thresholds and dosage values are unchanged. Reference frequencies are not reconstructed from the remaining QC-filtered columns.
+
+The option uses the existing numeric-dosage pairwise parameterisation. It does not add Cox interactions or a new categorical multi-parameter interaction test. Reference tests are added only when a QC-passing reference dosage is available. No extra multiple-testing correction is applied.

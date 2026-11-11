@@ -35,11 +35,13 @@ def _cov_terms(abt: pd.DataFrame, covar_cols: list[str]) -> list[str]:
     return [categorical_term(c, abt[c].dtype) for c in covar_cols]
 
 
-def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], model_type: str) -> dict:
+def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], model_type: str, *, _return_model=False) -> dict:
     """
     Fit a univariate association model and return p/coef/CI and INFO.
 
     If convergence or finiteness checks fail, return TEST and INFO only.
+    The private _return_model option keeps the fitted object inside the worker
+    for validated reverse contrasts; the default returns the existing dict.
 
     Model:
       Y ~ covars + geno_col
@@ -51,10 +53,11 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
 
     info = _fit_info(m, model_type)
     if info:
-        return {"INFO": info, "TEST": "SINGLE"}
+        out = {"INFO": info, "TEST": "SINGLE"}
+        return (out, m) if _return_model else out
 
     ci = m.conf_int().loc[geno_term]
-    return {
+    out = {
         "P-value": float(m.pvalues[geno_term]),
         "Beta": float(m.params[geno_term]),
         "StdErr": float(m.bse[geno_term]),
@@ -64,6 +67,8 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
         "INFO": np.nan,
         "Statistic": float(m.tvalues[geno_term]),
     }
+
+    return (out, m) if _return_model else out
 
 
 def fit_standard_null(abt, covar_cols, model_type):

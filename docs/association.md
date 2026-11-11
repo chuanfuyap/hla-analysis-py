@@ -113,6 +113,7 @@ results = hp.stats.analyse(
 | `covar` | `pandas.DataFrame`, `str`, `Path` or `None` | Optional IID-indexed covariates. A path is read as comma-separated CSV with the first column as the index. Load whitespace-delimited files with pandas first. All supplied covariate columns enter the model. |
 | `y` | `pandas.Series`, one-dimensional array-like or `None` | Phenotype. A Series must be indexed by IID. Arrays follow FAM row order. If omitted, use `famfile["PHENO"]`. |
 | `variant_filter` | callable or `None` | Function receiving a variant context dictionary and returning `True` to keep or `False` to exclude the variant. Use the supplied filter helpers for lists of IDs or genes; see below. |
+| `residue` | `bool`, default `False` | For AA analysis, retain the position-level test and append individual residue one-vs-rest tests, including the reference residue when its dosage is available and passes QC. |
 | `condition_on` | `str`, sequence of strings or `None` | Variant IDs from the same selected genotype block to include as adjustment covariates. Conditioning variants are excluded from testing. For AA, supply position IDs without residue suffixes. |
 | `verbose` | `bool`, default `True` | Print scheduled variant counts, execution settings, progress and timing. |
 | `use_progress_bar` | `bool`, default `False` | Use a tqdm progress bar when available and `verbose=True`; otherwise use periodic progress messages. |
@@ -316,3 +317,20 @@ Parse labelled MULTI coefficients before numerical calculations; do not apply
 P-value remains a joint test, even when individual coefficients are exported.
 
 F
+
+## Optional residue one-vs-rest tests
+
+Use `residue=True` with `hp.stats.analyse()` and `kind="AA"` to append residue tests to the existing position-level results.
+
+```python
+results = hp.stats.analyse(
+    hladat, hp.stats.StandardConfig(model_type="logit", n_jobs=4),
+    kind="AA", y=phenotype, covar=covar, residue=True,
+)
+position_results = results[results["TEST"].isin(["SINGLE", "MULTI"])]
+residue_results = results[results["TEST"] == "OVR"]
+```
+
+At a multiallelic position, the existing `MULTI` row is retained. Each QC-passing residue then gets a separate `Y ~ covariates + residue_dosage` test through the existing univariate model. The comparison is that residue versus all other residues; it is not a comparison against only `Ref_AA`.
+
+For biallelic positions, the existing `SINGLE` row already tests one residue, so only the opposite residue is appended. Additional OVR rows use `Ref_AA="tested: S"` to identify the tested residue, without a reference label. When the dosages sum to two on the same model samples and the fitted model has a supported full-rank intercept design, the opposite result is inferred without another fit. Beta and the signed statistic change sign; the confidence interval becomes `[-old_upper, -old_lower]`. P-value, standard error and sample counts are retained. Otherwise, the opposite dosage is fitted explicitly.

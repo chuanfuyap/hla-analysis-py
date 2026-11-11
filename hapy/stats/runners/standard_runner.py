@@ -25,10 +25,12 @@ import pandas as pd
 from .logger import get_runner_logger
 from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
-from ..preprocess import prepare_y, prepare_covar, make_model_table, build_model_predictors, attach_model_phenotype, sample_index
+from ..preprocess import prepare_y, prepare_covar, make_model_table, build_model_predictors, attach_model_phenotype, sample_index, _case_control_counts
 from ..models.standard import fit_univariate, fit_omnibus
 from ..models import standard as standard_models
 from ..adapters._samples import null_sample_ids
+from ..adapters.aa import AAAdapter, aa_frequency
+from ..models._residue import can_reverse, reverse_standard
 from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
 
@@ -166,7 +168,7 @@ def _prepare_shared_null(ids, y, covdf, covar_cols, model_type):
 
 
 def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
-                      covar_cols_local, model_type, used_conditions, skipped_conditions, null_cache=None):
+                      covar_cols_local, model_type, used_conditions, skipped_conditions, null_cache=None, aa_geno=None, residue=False, ovr_source=None):
     """Fit one phenotype."""
     row = dict(meta)
     row["VARIANT"] = variant_id
@@ -190,7 +192,10 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     row.setdefault("CI-lower", np.nan)
     row.setdefault("CI-upper", np.nan)
 
-    if qc["N_used"] == 0 or len(geno_cols) == 0:
+    if aa_geno is not None:
+        row["AA_AF"] = aa_frequency(aa_geno, abt.index)
+
+    if len(geno_cols) == 0 or (qc["N_used"] == 0 and not residue):
         return row
 
     if len(geno_cols) == 1:
@@ -199,12 +204,45 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
         elif adapter.KIND == "HLA":
             row["HLA_AF"] = _af_from_col(abt[geno_cols[0]])
 
-    if len(geno_cols) == 1:
-        row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
-    else:
-        row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type, null_cache=null_cache))
-
-    return row
+    model = None
+    if qc["N_used"]:
+        if len(geno_cols) == 1:
+            if residue:
+                fitted, model = fit_univariate(abt, geno_cols[0], covar_cols_local, model_type, _return_model=True)
+                row.update(fitted)
+            else:
+                row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
+        else:
+            row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type, null_cache=null_cache))
+    if not residue or aa_geno is None:
+        return row
+    rows = [row]
+    labels = aa_geno.attrs.get("residue_labels", {})
+    # SINGLE already tests its one non-reference residue. MULTI needs every residue.
+    extra = [c for c in aa_geno if len(geno_cols) > 1 or c not in geno_cols]
+    for col in extra:
+        source = ovr_source if ovr_source is not None else abt.assign(**{col: aa_geno[col].reindex(abt.index)})
+        ovr_abt = source[[col, *covar_cols_local, "Y"]].dropna()
+        dosage = aa_geno[col].reindex(ovr_abt.index)
+        ovr = {k: v for k, v in row.items() if k not in {
+            "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF", "TEST", "INFO"}}
+        if len(ovr_abt) == 0:
+            result = {"INFO": "no complete-case samples"}
+        elif (len(geno_cols) == 1 and len(aa_geno.columns) == 2
+              and can_reverse(ovr_abt, aa_geno[geno_cols[0]].reindex(ovr_abt.index), dosage, model, model_type, covar_cols_local)
+              and pd.notna(row.get("P-value"))):
+            result = reverse_standard(row)
+        else:
+            result = fit_univariate(ovr_abt, col, covar_cols_local, model_type)
+        ovr.update(result)
+        ovr["Ref_AA"] = f"tested: {labels.get(col, col)}"
+        ovr["AA_AF"] = aa_frequency(aa_geno, ovr_abt.index, tested=col)
+        ovr["TEST"] = "OVR"
+        ovr["N_used"] = len(ovr_abt)
+        ovr["N_dropped_other"] = qc["N_total"] - qc["N_missing_Y"] - len(ovr_abt)
+        ovr.update(_case_control_counts(ovr_abt))
+        rows.append(ovr)
+    return rows
 
 
 def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
@@ -219,8 +257,11 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
         condition_on_list = state["condition_on_list"]
 
         # Main tested genotype
-        geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
-        geno_cols = list(geno_df.columns)
+        all_geno, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index,
+            **({"retain_reference": True} if adapter is AAAdapter else {}))
+        aa_geno = all_geno if adapter is AAAdapter else None
+        geno_cols = list(all_geno.attrs.get("test_columns", all_geno.columns))
+        geno_df = all_geno[geno_cols]
 
         covdf_local = covdf
         covar_cols_local = covar_cols
@@ -239,10 +280,13 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
                 return {**meta, "VARIANT": variant_id, "INFO": "excluded by variant filter"}
 
         abt, qc = make_model_table(geno_df, yser, covdf_local)
+        ovr_source = None
+        if state.get("residue", False) and aa_geno is not None:
+            ovr_source = pd.concat([build_model_predictors(aa_geno, covdf_local), yser.rename("Y")], axis=1)
 
         return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
                                  covar_cols_local, model_type, used_conditions, skipped_conditions,
-                                 null_cache=state.get("null_cache"))
+                                 null_cache=state.get("null_cache"), aa_geno=aa_geno, residue=state.get("residue", False), ovr_source=ovr_source)
 
     except Exception:
         logger = get_runner_logger()
@@ -264,6 +308,7 @@ def run_standard(
     variant_filter=None,
     condition_on=None,
     *,
+    residue: bool = False,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
@@ -333,6 +378,7 @@ def run_standard(
         "variant_filter": variant_filter,
         "condition_on_list": condition_on_list,
         "null_cache": null_cache,
+        "residue": residue,
     }
 
 
@@ -356,7 +402,7 @@ def run_standard(
         batch_size=getattr(config, "batch_size", 32),
         max_in_flight=getattr(config, "chunksize", None),
     ):
-        rows.append(r)
+        rows.extend(r if isinstance(r, list) else [r])
         if prog is not None:
             prog.update(1)
 
@@ -384,7 +430,9 @@ def run_standard(
 def _run_many_one_variant(variant_id, *, state):
     adapter = state['adapter']
     try:
-        geno, meta = adapter.build_geno(state['hladat'], variant_id, sample_index=state['sample_index'])
+        all_geno, meta = adapter.build_geno(state['hladat'], variant_id, sample_index=state['sample_index'],
+            **({'retain_reference': True} if adapter is AAAdapter else {}))
+        geno = all_geno[list(all_geno.attrs.get('test_columns', all_geno.columns))]
     except Exception as exc:
         exc.add_note(f"While preparing genotype columns for variant {variant_id!r}.")
         raise
@@ -397,7 +445,8 @@ def _run_many_one_variant(variant_id, *, state):
             results[name] = _fit_prepared_row(
                 abt, qc, meta, variant_id, adapter, geno_cols, state['covar_cols'],
                 state['model_type'], state['condition_on_list'], [],
-                null_cache=state.get('null_caches', {}).get(name))
+                null_cache=state.get('null_caches', {}).get(name),
+                aa_geno=all_geno if adapter is AAAdapter else None)
         except Exception as exc:
             exc.add_note(f"While analysing phenotype {name!r}, variant {variant_id!r}.")
             raise

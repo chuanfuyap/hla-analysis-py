@@ -96,6 +96,7 @@ def fit_pairwise_interaction(
     model_type: str,
     *,
     compute_lrt: bool = False,
+    _return_model: bool = False,
 ) -> dict:
     """
     Fit a pairwise interaction model and return interaction statistics.
@@ -143,6 +144,7 @@ def fit_pairwise_interaction(
         checks pass; otherwise estimates are missing and INFO gives a reason.
         compute_lrt=True additionally returns LR_p and Anova_p comparisons.
     """
+    # Private worker-only access permits exact contrast/covariance transforms.
     cov_terms = _terms(abt, baseline_covars)
     a_t = _term(abt, a_col)
     b_t = _term(abt, b_col)
@@ -156,12 +158,14 @@ def fit_pairwise_interaction(
     iterm = f"{a_t}:{b_t}"
     info = _fit_info(alt, model_type)
     if info:
-        return _failed_result(info)
+        out = _failed_result(info)
+        return (out, alt) if _return_model else out
     if compute_lrt:
         nul = _fit(basef, abt, model_type)
         info = _fit_info(nul, model_type)
         if info:
-            return _failed_result(f"null model: {info}")
+            out = _failed_result(f"null model: {info}")
+            return (out, alt) if _return_model else out
 
     # NOTE: This assumes the interaction term appears as a single coefficient.
     # For categorical expansions, statsmodels may create multiple interaction params.
@@ -188,7 +192,7 @@ def fit_pairwise_interaction(
         out["LR_p"] = float(lrp)
         out["Anova_p"] = float(fp)
 
-    return out
+    return (out, alt) if _return_model else out
 
 
 def fit_block_omnibus_interaction(

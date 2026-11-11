@@ -202,9 +202,13 @@ def getRefAA(haplo: str, aalist: list[str] | pd.Index) -> str:
     return aminoacids
 
 
-def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str], int]:
+def obt_haplo_hard(aadf: pd.DataFrame, retain_reference: bool = False) -> tuple[pd.DataFrame, int, str, list[str], int]:
     """
-    Legacy helper: build haplotype matrix for hardcall AA and drop a reference haplotype.
+    Build QC-filtered hardcall dosages with the legacy reference selection.
+
+    retain_reference=True appends the original QC-passing reference dosage;
+    the default design columns remain recorded in attrs["test_columns"].
+    No QC-filtered haplotypes are restored and dosages are not renormalised.
 
     Returns
     -------
@@ -219,14 +223,17 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
     haplocount:
         Number of haplotype columns after dropping reference/missing.
     """
+    reference = None
     if aadf.shape[0] > 1:
         haplodf, aalist = makehaplodf(aadf)
         AAcount = haplodf.shape[1]
+        if AAcount == 0:
+            return haplodf, 0, None, [], 0
 
         missing = "".join(np.repeat("A", aadf.shape[0]))
         missing2 = "".join(np.repeat("a", aadf.shape[0]))
         if missing in haplodf.columns or missing2 in haplodf.columns:
-            haplodf = haplodf.drop(missing, axis=1)
+            haplodf = haplodf.drop(columns=[missing, missing2], errors="ignore")
             haplocount = haplodf.shape[1]
             haplodf.columns = aalist
             refAA = "missing"
@@ -237,6 +244,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
             refix = np.argmax(haplodf.sum())
             refcol = haplodf.columns[refix]
             haplo = haplo[refix]
+            reference = haplodf[[refcol]]
             haplodf = haplodf.drop(refcol, axis=1)
             haplocount = haplodf.shape[1]
             refAA = getRefAA(haplo, aadf.index)
@@ -248,6 +256,7 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
         if len(aalist) > 1:
             refix = np.argmax(haplodf.sum())
             refcol = haplodf.columns[refix]
+            reference = haplodf[[refcol]]
             haplodf = haplodf.drop(columns = refcol)
             haplocount = haplodf.shape[1]
             refAA = refcol
@@ -260,10 +269,20 @@ def obt_haplo_hard(aadf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str
 
     haplodf.columns = [cname.replace(".", "dot").replace("*", "asterisk") for cname in haplodf.columns]
 
+    test_columns = tuple(haplodf.columns)
+    reference_column = None
+    if retain_reference and reference is not None:
+        reference = reference.copy()
+        reference.columns = [str(c).replace(".", "dot").replace("*", "asterisk") for c in reference.columns]
+        reference_column = reference.columns[0]
+        haplodf = pd.concat([haplodf, reference], axis=1)
+    if retain_reference:
+        haplodf.attrs["test_columns"] = test_columns
+        haplodf.attrs["reference_column"] = reference_column
     return haplodf, AAcount, refAA, aalist, haplocount
 
 
-def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFrame, int, str, list[str], int]:
+def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame, retain_reference: bool = False) -> tuple[pd.DataFrame, int, str, list[str], int]:
     """
     Legacy helper: build haplotype matrix for softcall AA and drop reference haplotype.
 
@@ -273,6 +292,11 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
         Subset AA dataframe for a single AA_ID.
     infodf:
         Matching info subset for the AA_ID.
+    retain_reference : bool, default False
+        Keep the original QC-passing reference dosage, without changing reference
+        selection or QC thresholds. For a single binary marker with known allele
+        labels, its opposite dosage is the complement of that original marker.
+        No complement is inferred from a QC-filtered multiresidue matrix.
 
     Returns
     -------
@@ -287,6 +311,7 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
     haplocount:
         Number of columns after reference dropping.
     """
+    reference = None
     if aadf.shape[0] > 1:
         haplodf = makehaploprob(aadf)
         aalist = list(haplodf.columns)
@@ -296,6 +321,7 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
 
         refix = np.argmax(haplodf.sum())
         refAA = haplodf.columns[refix]
+        reference = haplodf[[refAA]]
         haplodf = haplodf.drop(refAA, axis=1)
         haplocount = haplodf.shape[1]
 
@@ -314,6 +340,8 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
             else:
                 refAA = infodf["alleleB"].values[0]
                 aalist = list(infodf[["alleleA", "alleleB"]].values[0])
+            if refAA != "missing":
+                reference = pd.DataFrame({str(refAA): 2.0 - haplodf.iloc[:, 0]}, index=haplodf.index)
             haplocount = haplodf.shape[1]
         else:
             AAcount = 0
@@ -321,4 +349,14 @@ def obt_haplo_soft(aadf: pd.DataFrame, infodf: pd.DataFrame) -> tuple[pd.DataFra
             aalist = list(infodf[["alleleA", "alleleB"]].values[0])
             haplocount = haplodf.shape[1]
 
+    test_columns = tuple(haplodf.columns)
+    reference_column = None
+    if retain_reference and reference is not None:
+        reference = reference.copy()
+        reference.columns = [str(c).replace(".", "dot").replace("*", "asterisk") for c in reference.columns]
+        reference_column = reference.columns[0]
+        haplodf = pd.concat([haplodf, reference], axis=1)
+    if retain_reference:
+        haplodf.attrs["test_columns"] = test_columns
+        haplodf.attrs["reference_column"] = reference_column
     return haplodf, AAcount, refAA, aalist, haplocount

@@ -106,7 +106,7 @@ class AAAdapter:
         return list(hladat.AA.info["AA_ID"].unique())
 
     @staticmethod
-    def build_geno(hladat, variant_id: str, sample_index: pd.Index) -> tuple[pd.DataFrame, dict]:
+    def build_geno(hladat, variant_id: str, sample_index: pd.Index, retain_reference: bool = False) -> tuple[pd.DataFrame, dict]:
         """
         Build genotype feature matrix for one AA_ID.
 
@@ -119,6 +119,9 @@ class AAAdapter:
                 - hladat.type: "softcall" or "hardcall"
         variant_id:
             AA_ID key to subset.
+        retain_reference : bool, default False
+            Retain QC-passing reference dosages for OVR tests. The original
+            non-reference design is recorded in DataFrame.attrs["test_columns"].
         sample_index:
             IID index for analysis (strings). Used to subset genotype columns.
 
@@ -146,12 +149,21 @@ class AAAdapter:
         aadf["AA_ID"] = aainfo["AA_ID"].to_numpy()
 
         if hladat.type == "softcall":
-            haplodf, AAcount, refAA, aalist, _ = obt_haplo_soft(aadf, aainfo)
+            haplodf, AAcount, refAA, aalist, _ = obt_haplo_soft(aadf, aainfo, retain_reference=retain_reference)
         else:
-            haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf)
+            haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf, retain_reference=retain_reference)
 
         haplodf = haplodf.sort_index()
+        test_columns = haplodf.attrs.get("test_columns", tuple(haplodf.columns))
+        reference_column = haplodf.attrs.get("reference_column")
         haplodf.columns = [f"G_{c}" for c in haplodf.columns]
+        haplodf.attrs["test_columns"] = tuple(f"G_{c}" for c in test_columns)
+        haplodf.attrs["reference_column"] = f"G_{reference_column}" if reference_column is not None else None
+        labels = {c: c[2:] for c in haplodf.columns}
+        if "G_solo_amino_acid" in labels:
+            suffix = str(aadf.index[0]).split("_")[-1]
+            labels["G_solo_amino_acid"] = suffix if len(suffix) == 1 else str(aainfo["alleleA"].iloc[0])
+        haplodf.attrs["residue_labels"] = labels
 
         meta = {
             "VARIANT": variant_id,
@@ -160,12 +172,22 @@ class AAAdapter:
             "Amino_Acids": ", ".join(sorted({str(x) for x in aalist})),
             "Ref_AA": refAA,
             "AAcount": AAcount,
-            "AA_AF": aa_allele_frequency(
+            "AA_AF": aa_frequency(haplodf, haplodf.index) if retain_reference else aa_allele_frequency(
                 aadf, hladat.type, refAA,
                 effect_allele=(aainfo["alleleA"].iloc[0]
                                if hladat.type == "softcall" and len(aadf) == 1 else None),
             )
         }
 
-        meta['INFO'] = 'insufficient variation' if haplodf.shape[1] == 0 else np.nan
+        meta['INFO'] = 'insufficient variation' if len(test_columns) == 0 else np.nan
         return haplodf, meta
+
+def aa_frequency(geno, index, tested=None):
+    """Format dosage AFs using final model samples, never a QC-column complement."""
+    labels = geno.attrs.get("residue_labels", {})
+    columns = [tested] if tested is not None else list(geno.columns)
+    values = geno.reindex(index)
+    if len(values) == 0:
+        return np.nan
+    return ";".join(f"{labels.get(c, c.removeprefix('G_'))}={values[c].sum(min_count=len(values)) / (2 * len(values)):.6g}"
+                    for c in columns)

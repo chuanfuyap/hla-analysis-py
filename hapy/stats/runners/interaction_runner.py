@@ -26,6 +26,8 @@ from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_y, prepare_covar, make_model_table, sample_index
 from ..models.interaction import fit_pairwise_interaction, fit_block_omnibus_interaction, _failed_result
+from ..adapters.aa import AAAdapter, aa_frequency
+from ..models._residue import can_reverse, reverse_interaction
 
 
 def _af_safe(series: pd.Series) -> float:
@@ -190,10 +192,20 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
             }
         )
 
+        row["AA_AF"] = np.nan
+        if partner_kind == "AA":
+            row["Partner_AA_AF"] = np.nan
+
         # If no rows remain after merging / NA filtering, return empty stats
         if abt.shape[0] == 0:
             row.update(_failed_result("no complete-case samples", omnibus=True))
             return row
+        full, _ = state["a_full_blocks"][a_id]
+        if "residue_labels" in full.attrs:
+            row["AA_AF"] = aa_frequency(full, abt.index)
+        if partner_kind == "AA":
+            other, _ = state["b_full_blocks"][b_id]
+            row["Partner_AA_AF"] = aa_frequency(other, abt.index)
         row.update(_predictor_summary(abt[partner_col], partner_kind, "Partner"))
 
         # Fit omnibus interaction model:
@@ -240,10 +252,20 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
 
 
 
+    row["AA_AF"] = np.nan
+    if kind == "AA":
+        row["Partner_AA_AF"] = np.nan
+
     # If analysis table is empty, return row with NA stats
     if abt.shape[0] == 0:
         row.update(_failed_result("no complete-case samples", omnibus=True))
         return row
+    full, _ = state["b_full_blocks"][b_id]
+    if "residue_labels" in full.attrs:
+        row["AA_AF"] = aa_frequency(full, abt.index)
+    if kind == "AA":
+        other, _ = state["a_full_blocks"][a_id]
+        row["Partner_AA_AF"] = aa_frequency(other, abt.index)
     row.update(_predictor_summary(abt[partner_col], kind, "Partner"))
 
 
@@ -253,7 +275,110 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
     return row
 
 
-def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
+def _aa_pair_metadata(row, state, a_id, ac, b_id, bc, index):
+    """Refresh AA frequencies on the actual pair's complete-case samples."""
+    if "a_full_blocks" not in state:
+        return
+    for side, variant, col, prefix, kind in (
+        ("a", a_id, ac, "", state["kind"]),
+        ("b", b_id, bc, "Partner_", state["partner_kind"]),
+    ):
+        if kind != "AA":
+            continue
+        full, meta = state[f"{side}_full_blocks"][variant]
+        if "residue_labels" not in full.attrs:
+            continue
+        ref_col = full.attrs.get("reference_column")
+        extra = state.get("residue", False) and col == ref_col
+        row[f"{prefix}AA_AF"] = aa_frequency(full, index, tested=col if extra else None)
+        if extra:
+            row[f"{prefix}Ref_AA"] = f"tested: {full.attrs['residue_labels'][col]}"
+
+
+def _run_residue_pairs(task, state):
+    """Keep all residue combinations for a position pair in the existing worker."""
+    a_id, pairs, b_id, _ = task
+    a_full, _ = state["a_full_blocks"][a_id]
+    b_full, _ = state["b_full_blocks"][b_id]
+    # Reuse one ABT when all residue/partner columns share a missingness mask.
+    # Otherwise retain the original per-combination complete-case construction.
+    occupied = set(a_full.columns) | set(state["baseline_covars_model"]) | {"Y"}
+    b_names = {}
+    for col in b_full.columns:
+        alias = str(col)
+        while alias in occupied:
+            alias = "_partner_" + alias
+        occupied.add(alias)
+        b_names[col] = alias
+    genotype = pd.concat([a_full, b_full.rename(columns=b_names)], axis=1)
+    missing = genotype.isna()
+    prepared = None
+    if missing.any(axis=1).equals(missing.all(axis=1)):
+        shared, qc = make_model_table(genotype, state["yser"], state["covdf_model"])
+        prepared = (shared, qc, b_names)
+    groups = {}
+    for ac, bc in pairs:
+        source = []
+        reverse = []
+        for side, variant, col in (("a", a_id, ac), ("b", b_id, bc)):
+            full, _ = state[f"{side}_full_blocks"][variant]
+            original = list(full.attrs.get("test_columns", full.columns))
+            is_reverse = (col == full.attrs.get("reference_column")
+                          and len(original) == 1 and len(full.columns) == 2)
+            source.append(original[0] if is_reverse else col)
+            reverse.append(is_reverse)
+        groups.setdefault(tuple(source), []).append((ac, bc, source, reverse))
+    rows = {}
+    for group in groups.values():
+        fitted = {}
+        for ac, bc, source, reverse in group:
+            rows[(ac, bc)] = _fit_residue_pair(a_id, ac, b_id, bc, source, reverse, fitted, state, prepared)
+    return [rows[pair] for pair in pairs]
+
+
+def _fit_residue_pair(a_id, ac, b_id, bc, source, reverse, fitted, state, prepared):
+    key = tuple(source)
+    inferred = None
+    if any(reverse) and key in fitted:
+        old_row, model, abt = fitted[key]
+        # The opposite residue can have a different missingness pattern.
+        # Validate against its own final modelling rows before inferring.
+        a_full, _ = state["a_full_blocks"][a_id]
+        b_full, _ = state["b_full_blocks"][b_id]
+        target_bc = bc if ac != bc else "__partner_dosage"
+        if prepared is not None:
+            target = prepared[0]
+        else:
+            target, _ = make_model_table(pd.concat([a_full[[ac]], b_full[[bc]].rename(columns={bc: target_bc})], axis=1),
+                                         state["yser"], state["covdf_model"])
+        valid = (model is not None and pd.notna(old_row.get("P-value"))
+                 and target.index.equals(abt.index))
+        for side, variant, col, source_col, flip in zip(("a", "b"), (a_id, b_id), (ac, bc), source, reverse):
+            if flip and valid:
+                full, _ = state[f"{side}_full_blocks"][variant]
+                valid = can_reverse(target, full[source_col].reindex(target.index),
+                                    full[col].reindex(target.index), model, state["config"].model_type,
+                                    state["baseline_covars_model"])
+        if valid:
+            model_bc = prepared[2][source[1]] if prepared is not None else (source[1] if source[0] != source[1] else "__partner_dosage")
+            inferred = reverse_interaction(old_row, model, source[0], model_bc, *reverse)
+        if inferred is not None:
+            if "Variant_col" in inferred:
+                inferred["Variant_col"] = ac
+            inferred["Partner_col"] = bc
+            _aa_pair_metadata(inferred, state, a_id, ac, b_id, bc, abt.index)
+            b_full, _ = state["b_full_blocks"][b_id]
+            inferred.update(_predictor_summary(b_full[bc].reindex(abt.index), state["partner_kind"], "Partner"))
+    if inferred is None:
+        row, model, abt = _run_pairwise_task((a_id, ac, b_id, bc), state=state, _details=True, _prepared=prepared)
+        fitted[(ac, bc)] = (row, model, abt)
+        return row
+    return inferred
+
+
+def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict, _details=False, _prepared=None) -> dict:
+    if isinstance(task[1], tuple):
+        return _run_residue_pairs(task, state)
     a_blocks = state["a_blocks"]
     b_blocks = state["b_blocks"]
     yser = state["yser"]
@@ -263,11 +388,16 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
     partner_kind = state["partner_kind"]
     config = state["config"]
     a_id, ac, b_id, bc = task
-    a_df, a_meta = a_blocks[a_id]
-    b_df, b_meta = b_blocks[b_id]
+    a_df, a_meta = state.get("a_full_blocks", a_blocks)[a_id]
+    b_df, b_meta = state.get("b_full_blocks", b_blocks)[b_id]
 
-    geno = pd.concat([a_df[[ac]], b_df[[bc]]], axis=1)
-    abt, qc = make_model_table(geno, yser, covdf_model)
+    if _prepared is not None:
+        abt, qc, b_names = _prepared
+        model_bc = b_names[bc]
+    else:
+        model_bc = bc if ac != bc else "__partner_dosage"
+        geno = pd.concat([a_df[[ac]], b_df[[bc]].rename(columns={bc: model_bc})], axis=1)
+        abt, qc = make_model_table(geno, yser, covdf_model)
 
     row: dict = {}
     row.update(qc)
@@ -275,25 +405,30 @@ def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict) -> dict:
         {
             **{k: v for k, v in a_meta.items() if k not in {"VARIANT", "INFO"}},
             "VARIANT": a_id,
-            **({"Variant_col": ac} if len(a_df.columns) > 1 else {}),
+            **({"Variant_col": ac} if len(a_blocks[a_id][0].columns) > 1 else {}),
             "Partner_col": bc,
             **{f"Partner_{k}": v for k, v in b_meta.items()
                if k not in {"AAcount", "VARIANT"}},
         }
     )
 
+    _aa_pair_metadata(row, state, a_id, ac, b_id, bc, abt.index)
     if abt.shape[0] == 0:
         row.update(_failed_result("no complete-case samples"))
-        return row
+        return (row, None, abt) if _details else row
 
     if kind == "HLA":
         row["HLA_AF"] = _af_safe(abt[ac])
     elif kind == "SNP":
         frequency = _af_safe(abt[ac])
         row["MAF"] = min(frequency, 1.0 - frequency)
-    row.update(_predictor_summary(abt[bc], partner_kind, "Partner"))
+    row.update(_predictor_summary(abt[model_bc], partner_kind, "Partner"))
 
-    row.update(fit_pairwise_interaction(abt, ac, bc, baseline_covars_model, config.model_type))
+    if _details:
+        result, model = fit_pairwise_interaction(abt, ac, model_bc, baseline_covars_model, config.model_type, _return_model=True)
+        row.update(result)
+        return row, model, abt
+    row.update(fit_pairwise_interaction(abt, ac, model_bc, baseline_covars_model, config.model_type))
     return row
 
 
@@ -331,11 +466,14 @@ def run_interaction(
     condition_on=None,
     *,
     variant_filter=None,
+    residue: bool = False,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 500,
 ) -> pd.DataFrame:
     t0 = time.perf_counter()
+    if residue and config.mode != "pairwise":
+        raise ValueError("residue=True requires mode='pairwise'.")
     if variant_filter is not None and not callable(variant_filter):
         raise TypeError("variant_filter must be callable or None; use the ID/gene filter helpers.")
 
@@ -424,7 +562,10 @@ def run_interaction(
         if not a_ids:
             return pd.DataFrame()
 
-    a_blocks = {vid: adapter_a.build_geno(hladat, vid, sample_index=yser.index) for vid in a_ids}
+    a_full_blocks = {vid: adapter_a.build_geno(hladat, vid, sample_index=yser.index,
+        **({"retain_reference": True} if adapter_a is AAAdapter else {})) for vid in a_ids}
+    a_blocks = {vid: (df[list(df.attrs.get("test_columns", df.columns))], meta)
+                for vid, (df, meta) in a_full_blocks.items()}
 
     if partner_kind == "COV":
         b_blocks = {"COV_BLOCK": (covdf[cov_block_cols].copy(), {"VARIANT": "COV_BLOCK"})}
@@ -433,7 +574,12 @@ def run_interaction(
         b_blocks = {"DF_BLOCK": (partner_data.copy(), {"VARIANT": "DF_BLOCK"})}
     else:
         b_ids = list(adapter_b.iter_variants(hladat))
-        b_blocks = {vid: adapter_b.build_geno(hladat, vid, sample_index=yser.index) for vid in b_ids}
+        b_blocks = {vid: adapter_b.build_geno(hladat, vid, sample_index=yser.index,
+            **({"retain_reference": True} if adapter_b is AAAdapter else {})) for vid in b_ids}
+
+    b_full_blocks = b_blocks
+    b_blocks = {vid: (df[list(df.attrs.get("test_columns", df.columns))], meta)
+                for vid, (df, meta) in b_full_blocks.items()}
 
     cond_df, cond_cols = _build_condition_covariates(
         adapter_a=adapter_a,
@@ -460,6 +606,9 @@ def run_interaction(
 
     worker_state = {
         "a_blocks": a_blocks,
+        "a_full_blocks": a_full_blocks,
+        "b_full_blocks": b_full_blocks,
+        "residue": residue,
         "b_blocks": b_blocks,
         "yser": yser,
         "covdf_model": covdf_model,
@@ -478,8 +627,11 @@ def run_interaction(
             if a_id in condition_on_set:
                 continue
             for b_id, (b_df, b_meta) in b_blocks.items():
-                for ac in a_df.columns:
-                    for bc in b_df.columns:
+                pairs = []
+                a_columns = a_full_blocks[a_id][0].columns if residue and len(a_df.columns) else a_df.columns
+                b_columns = b_full_blocks[b_id][0].columns if residue and len(b_df.columns) else b_df.columns
+                for ac in a_columns:
+                    for bc in b_columns:
                         ctx = {
                             "analysis": "interaction",
                             "kind": kind,
@@ -493,7 +645,12 @@ def run_interaction(
                         }
                         if pair_filter is not None and not pair_filter(ctx):
                             continue
-                        tasks.append((a_id, ac, b_id, bc))
+                        if residue:
+                            pairs.append((ac, bc))
+                        else:
+                            tasks.append((a_id, ac, b_id, bc))
+                if residue and pairs:
+                    tasks.append((a_id, tuple(pairs), b_id, None))
 
         if verbose:
             print(f"pairs available to analyse (scheduled tasks): {len(tasks)}", flush=True)
@@ -515,7 +672,7 @@ def run_interaction(
             batch_size=getattr(config, "batch_size", 32),
             max_in_flight=getattr(config, "chunksize", None),  # chunksize == max in-flight batches
         ):
-            rows.append(r)
+            rows.extend(r if isinstance(r, list) else [r])
             if prog is not None:
                 prog.update(1)
 

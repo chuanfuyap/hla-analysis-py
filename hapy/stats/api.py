@@ -35,6 +35,7 @@ def analyse(
     y=None,
     variant_filter=None,
     condition_on: str | list[str] | None = None,
+    residue: bool = False,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
@@ -70,6 +71,9 @@ def analyse(
     condition_on : str, sequence of str or None, default None
         Optional variant input for conditional analysis
         For AA analysis, use only the the variant name up to the genomic position, e.g. "AA_DRB1_11_32552129"
+    residue : bool, default False
+        For kind="AA", append residue one-vs-rest tests, including the QC-passing
+        reference residue when available. Position-level results are retained.
     verbose : bool, default True
         If True, prints progress messages with flush=True.
     use_progress_bar : bool, default False
@@ -96,6 +100,9 @@ def analyse(
     if not hasattr(hladat, kind):
         raise ValueError(f"{kind} not loaded. Please read the file type into HLAdat object.")
 
+    if residue and kind != "AA":
+        raise ValueError("residue=True is only supported for kind='AA'.")
+
     adapter = _KIND_MAP[kind]
     return run_standard(
         adapter,
@@ -106,6 +113,7 @@ def analyse(
         y=y,
         variant_filter=variant_filter,
         condition_on=condition_on,
+        residue=residue,
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,
@@ -224,6 +232,7 @@ def interaction(
     baseline_covar_cols: list[str] | None = None,
     partner_data: pd.DataFrame | None = None,
     condition_on=None,
+    residue: bool = False,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 500,
@@ -293,6 +302,9 @@ def interaction(
     condition_on:
         Optional A-side same-kind variant id or list of variant ids to include as conditioning covariates.
         Any tested task whose A-side variant is in this set is not modeled.
+    residue : bool, default False
+        Include QC-passing reference AA residue interactions. Only supported
+        in config.mode="pairwise", with AA on at least one side.
     verbose, use_progress_bar, print_every:
         Progress reporting controls.
 
@@ -302,6 +314,11 @@ def interaction(
         Pairwise mode: one row per (A_col, B_col) test.
         Omnibus mode: one row per (partner_col, AA_block_variant) test.
     """
+    if residue and config.mode != "pairwise":
+        raise ValueError("residue=True requires mode='pairwise'.")
+    if residue and kind != "AA" and partner_kind != "AA":
+        raise ValueError("residue=True requires AA on at least one interaction side.")
+
     if not hasattr(hladat, kind):
         raise ValueError(f"{kind} not loaded. Please read the file type into HLAdat object.")
     
@@ -343,6 +360,7 @@ def interaction(
         baseline_covar_cols=baseline_covar_cols,
         partner_data=partner_data,
         condition_on=condition_on,
+        residue=residue,
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,
