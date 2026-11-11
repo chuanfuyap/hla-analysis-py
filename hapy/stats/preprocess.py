@@ -384,7 +384,8 @@ def build_survival_table(
         table = merged
         keep_cols = ["sample_id", "time", "event"]
 
-    features = pd.get_dummies(table.drop(columns=keep_cols), drop_first=True)
+    predictors = table.drop(columns=keep_cols)
+    features = pd.get_dummies(predictors, drop_first=True) if len(predictors.columns) else predictors.copy()
     cox_df = pd.concat([table[keep_cols], features], axis=1)
     n_used = len(merged)
     n_event = int(merged["event"].sum())

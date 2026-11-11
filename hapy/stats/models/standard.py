@@ -18,6 +18,8 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 
 from .common import lrtest, anova, categorical_term, _fit_info
+from ._null import null_summary
+from scipy import stats
 
 
 def _fit(formula: str, abt: pd.DataFrame, model_type: str):
@@ -64,7 +66,20 @@ def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], mode
     }
 
 
-def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], model_type: str) -> dict:
+def fit_standard_null(abt, covar_cols, model_type):
+    """Fit the baseline once and retain its likelihood, actual rank and diagnostics."""
+    if abt.empty:
+        return None
+    terms = _cov_terms(abt, covar_cols)
+    formula = "Y ~ " + " + ".join(terms) if terms else "Y ~ 1"
+    baseline = abt[[*covar_cols, "Y"]]
+    model = _fit(formula, baseline, model_type)
+    info = _fit_info(model, model_type)
+    return null_summary(baseline, model.llf, getattr(model, "df_model", np.nan), model_type,
+                        (formula, tuple(covar_cols)), info)
+
+
+def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], model_type: str, *, null_cache=None) -> dict:
     """
     Fit an omnibus association test for multiple genotype columns.
 
@@ -75,9 +90,10 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
 
     Returns
     -------
-    dict with P-value, LR-stat, DoF, TEST and INFO. If either fit fails
+    dict with P-value, Statistic, DoF, TEST and INFO. If either fit fails
     convergence or finiteness checks, return TEST and INFO only.
     """
+    abt = abt.dropna(subset=["Y", *covar_cols, *geno_cols])
     cov_terms = _cov_terms(abt, covar_cols)
     geno_terms = [categorical_term(c, abt[c].dtype) for c in geno_cols]
     alt_terms = cov_terms + geno_terms
@@ -87,17 +103,24 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     nullf = "Y ~ " + " + ".join(null_terms) if null_terms else "Y ~ 1"
 
     alt = _fit(altf, abt, model_type)
-    nul = _fit(nullf, abt, model_type)
+    baseline = abt[[*covar_cols, "Y"]]
+    reuse = null_cache is not None and null_cache.matches(
+        baseline, model_type, (nullf, tuple(covar_cols)))
+    null = null_cache if reuse else fit_standard_null(abt, covar_cols, model_type)
+    null_info = null.info
 
     issues = []
-    for label, model in (("null model", nul), ("full model", alt)):
-        info = _fit_info(model, model_type)
+    for label, info in (("null model", null_info), ("full model", _fit_info(alt, model_type))):
         if info:
             issues.append(f"{label}: {info}")
     if issues:
         return {"INFO": "; ".join(issues), "TEST": "MULTI"}
 
-    lrstat, lrp, dof = lrtest(nul, alt)
+    null_llf = null.log_likelihood
+    null_df = null.df_model
+    lrstat = 2 * (alt.llf - null_llf)
+    dof = alt.df_model - null_df
+    lrp = stats.chi2.sf(lrstat, dof)
     #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 
     # Only keep genotype terms that exist in model

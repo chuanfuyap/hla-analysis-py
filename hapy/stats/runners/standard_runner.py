@@ -27,6 +27,9 @@ from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_y, prepare_covar, make_model_table, build_model_predictors, attach_model_phenotype, sample_index
 from ..models.standard import fit_univariate, fit_omnibus
+from ..models import standard as standard_models
+from ..adapters._samples import null_sample_ids
+from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
 
 
@@ -134,8 +137,36 @@ def _validate_conditioning_variants(adapter, hladat, condition_on_list: list[str
         )
 
 
+def _prepare_conditions(adapter, hladat, index, covdf, conditions):
+    """Construct the same adjustment columns once, independently of tested variants."""
+    covar_cols = list(covdf.columns) if covdf is not None else []
+    for variant in conditions:
+        adjustment, _ = adapter.build_geno(hladat, variant, sample_index=index)
+        if adjustment.shape[1] == 0:
+            raise ValueError(f"Conditioning variant {variant!r} has no eligible genotype columns.")
+        adjustment = adjustment.copy()
+        adjustment.columns = [f'COND_{_safe_name(variant)}__{c}' for c in adjustment.columns]
+        covdf = adjustment if covdf is None else pd.concat([covdf, adjustment], axis=1)
+        covar_cols.extend(adjustment.columns)
+    return covdf, covar_cols
+
+
+def _prepare_shared_null(ids, y, covdf, covar_cols, model_type):
+    if ids is None or len(ids) == 0:
+        return None
+    baseline, _ = make_model_table(pd.DataFrame(index=ids), y.reindex(ids),
+                                   covdf.reindex(ids) if covdf is not None else None)
+    try:
+        return standard_models.fit_standard_null(baseline, covar_cols, model_type)
+    except (PerfectSeparationError, np.linalg.LinAlgError, FloatingPointError, ValueError, ZeroDivisionError):
+        # Optional pre-fitting must not change exception behaviour for tests that
+        # turn out to be univariate/skipped. An actual omnibus refits locally,
+        # retaining the original error reporting if its baseline cannot fit.
+        return None
+
+
 def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
-                      covar_cols_local, model_type, used_conditions, skipped_conditions):
+                      covar_cols_local, model_type, used_conditions, skipped_conditions, null_cache=None):
     """Fit one phenotype."""
     row = dict(meta)
     row["VARIANT"] = variant_id
@@ -171,7 +202,7 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     if len(geno_cols) == 1:
         row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
     else:
-        row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type))
+        row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type, null_cache=null_cache))
 
     return row
 
@@ -191,34 +222,10 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
         geno_df, meta = adapter.build_geno(hladat, variant_id, sample_index=yser.index)
         geno_cols = list(geno_df.columns)
 
-        # Local covariates for this tested variant
-        covdf_local = covdf.copy() if covdf is not None else None
-        covar_cols_local = list(covar_cols)
-
-        used_conditions: list[str] = []
-        skipped_conditions: list[str] = []
-
-        # Add all requested conditioning variants as extra covariates
-        for cond_variant in condition_on_list:
-            if cond_variant == variant_id:
-                skipped_conditions.append(cond_variant)
-                continue
-
-            cond_df, _ = adapter.build_geno(hladat, cond_variant, sample_index=yser.index)
-            if cond_df.shape[1] == 0:
-                raise ValueError(f"Conditioning variant {cond_variant!r} has no eligible genotype columns.")
-            cond_df = cond_df.copy()
-
-            safe_vid = _safe_name(cond_variant)
-            cond_df.columns = [f"COND_{safe_vid}__{c}" for c in cond_df.columns]
-
-            if covdf_local is None:
-                covdf_local = cond_df
-            else:
-                covdf_local = pd.concat([covdf_local, cond_df], axis=1)
-
-            covar_cols_local.extend(cond_df.columns.tolist())
-            used_conditions.append(cond_variant)
+        covdf_local = covdf
+        covar_cols_local = covar_cols
+        used_conditions = condition_on_list
+        skipped_conditions = []
 
         if variant_filter is not None:
             ctx = {
@@ -234,7 +241,8 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
         abt, qc = make_model_table(geno_df, yser, covdf_local)
 
         return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
-                                 covar_cols_local, model_type, used_conditions, skipped_conditions)
+                                 covar_cols_local, model_type, used_conditions, skipped_conditions,
+                                 null_cache=state.get("null_cache"))
 
     except Exception:
         logger = get_runner_logger()
@@ -310,6 +318,11 @@ def run_standard(
         print("----------------", flush=True)
         print()
 
+    if variant_ids:
+        covdf, covar_cols = _prepare_conditions(adapter, hladat, yser.index, covdf, condition_on_list)
+    genetic_ids = null_sample_ids(adapter, hladat, yser.index, variant_ids)
+    null_cache = _prepare_shared_null(genetic_ids, yser, covdf, covar_cols, config.model_type)
+
     state = {
         "adapter": adapter,
         "hladat": hladat,
@@ -319,6 +332,7 @@ def run_standard(
         "model_type": config.model_type,
         "variant_filter": variant_filter,
         "condition_on_list": condition_on_list,
+        "null_cache": null_cache,
     }
 
 
@@ -382,7 +396,8 @@ def _run_many_one_variant(variant_id, *, state):
             abt, qc = attach_model_phenotype(predictors, y)
             results[name] = _fit_prepared_row(
                 abt, qc, meta, variant_id, adapter, geno_cols, state['covar_cols'],
-                state['model_type'], state['condition_on_list'], [])
+                state['model_type'], state['condition_on_list'], [],
+                null_cache=state.get('null_caches', {}).get(name))
         except Exception as exc:
             exc.add_note(f"While analysing phenotype {name!r}, variant {variant_id!r}.")
             raise
@@ -417,15 +432,7 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
     covar_cols = list(covdf.columns) if covdf is not None else []
     conditions = _normalize_condition_on(condition_on)
     _validate_conditioning_variants(adapter, hladat, conditions)
-    # Conditioning positions are not tested, so the same adjustment is reusable.
-    for variant in conditions:
-        adjustment, _ = adapter.build_geno(hladat, variant, sample_index=index)
-        if adjustment.shape[1] == 0:
-            raise ValueError(f"Conditioning variant {variant!r} has no eligible genotype columns.")
-        adjustment = adjustment.copy()
-        adjustment.columns = [f'COND_{_safe_name(variant)}__{c}' for c in adjustment.columns]
-        covdf = adjustment if covdf is None else pd.concat([covdf, adjustment], axis=1)
-        covar_cols.extend(adjustment.columns)
+    covdf, covar_cols = _prepare_conditions(adapter, hladat, index, covdf, conditions)
 
     variants = [v for v in adapter.iter_variants(hladat) if v not in set(conditions)]
     if variant_filter is not None:
@@ -439,9 +446,12 @@ def run_standard_many(adapter, hladat, config, phenotypes, famfile=None, covar=N
             if variant_filter(ctx):
                 selected.append(variant_id)
         variants = selected
+    genetic_ids = null_sample_ids(adapter, hladat, index, variants)
+    null_caches = {name: _prepare_shared_null(genetic_ids, y, covdf, covar_cols, config.model_type)
+                   for name, y in ys.items()}
     state = dict(adapter=adapter, hladat=hladat, sample_index=index, covdf=covdf,
                  covar_cols=covar_cols, phenotypes=ys, model_type=config.model_type,
-                 condition_on_list=conditions)
+                 condition_on_list=conditions, null_caches=null_caches)
     if verbose:
         print("----------------", flush=True)
         print(f"STARTING ANALYSES on:\t{adapter.KIND}, model={config.model_type}", flush=True)

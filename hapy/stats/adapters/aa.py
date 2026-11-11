@@ -23,6 +23,8 @@ which is suitable for omnibus testing.
 """
 
 from __future__ import annotations
+
+from ._samples import genotype_sample_ids
 import pandas as pd
 import numpy as np 
 
@@ -83,6 +85,10 @@ class AAAdapter:
     KIND = "AA"
 
     @staticmethod
+    def sample_ids(hladat, requested):
+        return genotype_sample_ids(hladat.AA.data, requested, hladat.type)
+
+    @staticmethod
     def iter_variants(hladat) -> list[str]:
         """
         List available AA positions/variants.
@@ -123,18 +129,21 @@ class AAAdapter:
         meta:
             Dict of annotations useful for output tables.
         """
-        df = hladat.AA.data.copy()
-        
-        info = hladat.AA.info.copy()
+        info = hladat.AA.info
 
-        df.index = df.index.astype(str)
-        df = subset_samples_beagle_orientation(df, sample_index, hladat.type)
-        if df.shape[1] == 0:
+        mask = info["AA_ID"].eq(variant_id).to_numpy()
+
+        aadf = hladat.AA.data.iloc[mask].copy()
+        aainfo = info.iloc[mask]
+
+        aadf.index = aadf.index.astype(str)
+        aadf = subset_samples_beagle_orientation(
+            aadf, sample_index, hladat.type
+        )
+        if aadf.shape[1] == 0:
             raise ValueError(f"{variant_id}: no overlapping genotype/phenotype sample IDs.")
 
-        df["AA_ID"] = info["AA_ID"]
-        aadf = df[df["AA_ID"] == variant_id]
-        aainfo = info[info["AA_ID"] == variant_id]
+        aadf["AA_ID"] = aainfo["AA_ID"].to_numpy()
 
         if hladat.type == "softcall":
             haplodf, AAcount, refAA, aalist, _ = obt_haplo_soft(aadf, aainfo)

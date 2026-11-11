@@ -4,6 +4,8 @@
 or SNP block of an `HLAdata` object. It returns a pandas DataFrame; results are
 not saved automatically.
 
+Omnibus tests reuse compatible baseline null models. See [null-model reuse](null_model_reuse.md) for validation rules, benchmarks and limitations.
+
 This page focuses on amino acid position tests with `kind="AA"`. Input rows can
 represent individual residues or residue encodings, but `hapy` groups them into
 positions before testing. A position such as `AA_DRB1_11_32552129` represents

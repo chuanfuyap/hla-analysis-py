@@ -19,6 +19,8 @@ from ..parallel import parallel_imap_batched
 from ..progress import ProgressPrinter, format_seconds
 from ..preprocess import prepare_covar, build_survival_table
 from ..models.survival import fit_cox_univariate, fit_cox_omnibus, _empty_cox_result
+from ..models import survival as survival_models
+from ..adapters._samples import null_sample_ids
 
 
 def _clean_output(dataframe: pd.DataFrame) -> pd.DataFrame:
@@ -92,7 +94,7 @@ def _run_survival_one_variant(variant_id: str, *, state: dict) -> dict:
         return row
 
     # Multi-column: check both Cox models before the omnibus LR test.
-    row.update(fit_cox_omnibus(cox_df, geno_cols))
+    row.update(fit_cox_omnibus(cox_df, geno_cols, null_cache=state.get("null_cache")))
     return row
 
 
@@ -138,6 +140,17 @@ def run_survival(
         print(f"parallel: n_jobs={config.n_jobs}, backend={config.backend}, batch_size={config.batch_size}, chunksize={config.chunksize}", flush=True)
         print("----------------", flush=True)
 
+    genetic_ids = null_sample_ids(adapter, hladat, iid_index, variant_ids)
+    null_cache = None
+    if genetic_ids is not None and len(genetic_ids):
+        baseline, baseline_qc = build_survival_table(
+            pd.DataFrame(index=genetic_ids), event_time,
+            cov=covdf.reindex(genetic_ids) if covdf is not None else None,
+            dynamic_covar=dynamic_covar,
+        )
+        if baseline_qc["N_used"] and baseline_qc["N_event"]:
+            null_cache = survival_models.fit_cox_null(baseline)
+
     state = {
         "adapter": adapter,
         "hladat": hladat,
@@ -146,6 +159,7 @@ def run_survival(
         "event_time": event_time,
         "dynamic_covar": dynamic_covar,
         "variant_filter": variant_filter,
+        "null_cache": null_cache,
     }
 
 

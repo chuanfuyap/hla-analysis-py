@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from lifelines import CoxPHFitter, CoxTimeVaryingFitter
 from lifelines.exceptions import ConvergenceError
+from ._null import null_summary
 
 
 def fit_cox_model(cox_df: pd.DataFrame):
@@ -80,11 +81,58 @@ def fit_cox_univariate(cox_df: pd.DataFrame, feature: str) -> dict:
     }
 
 
-def fit_cox_omnibus(cox_df: pd.DataFrame, geno_cols: list[str]) -> dict:
-    """Check full and null Cox fits before testing the genotype block jointly."""
+def _cox_specification(frame):
+    dynamic = {"start", "stop"}.issubset(frame.columns)
+    structural = ("sample_id", "start", "stop", "event") if dynamic else ("sample_id", "time", "event")
+    predictors = tuple(c for c in frame.columns if c not in structural)
+    return ("CoxTimeVaryingFitter" if dynamic else "CoxPHFitter", predictors)
+
+
+def _zero_predictor_log_likelihood(frame):
+    """Efron partial likelihood at zero predictors, including start/stop risk sets.
+
+    No intercept is estimated in a Cox model. With unit risk scores, a tied
+    group of d events in a risk set of r contributes -sum(log(r-j), j=0..d-1).
+    These are the same tie and interval conventions as both lifelines fitters.
+    """
+    dynamic = {"start", "stop"}.issubset(frame.columns)
+    stop = frame["stop" if dynamic else "time"].to_numpy(dtype=float)
+    event = frame["event"].to_numpy(dtype=bool)
+    times, deaths = np.unique(stop[event], return_counts=True)
+    risks = len(frame) - np.searchsorted(np.sort(stop), times, side="left")
+    if dynamic:
+        starts = np.sort(frame["start"].to_numpy(dtype=float))
+        risks = np.searchsorted(starts, times, side="left") - np.searchsorted(np.sort(stop), times, side="left")
+    return -float(sum(np.log(risk - np.arange(count)).sum()
+                      for risk, count in zip(risks, deaths)))
+
+
+def fit_cox_null(frame):
+    """Fit/evaluate a Cox baseline and retain a lightweight observation-checked summary."""
+    if frame.empty:
+        return None
+    model_type, predictors = _cox_specification(frame)
+    if not predictors:
+        llf, n_params, info = _zero_predictor_log_likelihood(frame), 0, ""
+    else:
+        model, info = _checked_cox_fit(frame)
+        llf = model.log_likelihood_ if model is not None else np.nan
+        n_params = len(model.params_) if model is not None else np.nan
+    return null_summary(frame, llf, n_params, model_type, (tuple(frame.columns), predictors),
+                        info, id_col="sample_id")
+
+
+def fit_cox_omnibus(cox_df: pd.DataFrame, geno_cols: list[str], *, null_cache=None) -> dict:
+    """Check full and compatible cached/local null Cox fits before the LR test."""
     full, full_info = _checked_cox_fit(cox_df)
     null_cols = [c for c in cox_df.columns if c not in set(geno_cols)]
-    null, null_info = _checked_cox_fit(cox_df[null_cols])
+    baseline = cox_df[null_cols]
+    model_type, predictors = _cox_specification(baseline)
+    specification = (tuple(baseline.columns), predictors)
+    reuse = null_cache is not None and null_cache.matches(
+        baseline, model_type, specification, id_col="sample_id")
+    null = null_cache if reuse else fit_cox_null(baseline)
+    null_info = null.info
     issues = []
     for label, info in (("null model", null_info), ("full model", full_info)):
         if info:
@@ -93,7 +141,8 @@ def fit_cox_omnibus(cox_df: pd.DataFrame, geno_cols: list[str]) -> dict:
         return _empty_cox_result("; ".join(issues))
     result = _empty_cox_result(np.nan)
     result["P-value"] = lrtest_cox(
-        float(full.log_likelihood_), float(null.log_likelihood_), dof=len(geno_cols),
+        float(full.log_likelihood_), null.log_likelihood,
+        dof=len(full.params_) - null.df_model,
     )
     return result
 

@@ -17,9 +17,16 @@ from ..preprocess import subset_samples_beagle_orientation
 from ._aa_haplo import obt_haplo_hard
 
 
+from ._samples import genotype_sample_ids
+
+
 class SNPAdapter:
     """Adapter for HLAdat.SNP genotype block."""
     KIND = "SNP"
+
+    @staticmethod
+    def sample_ids(hladat, requested):
+        return genotype_sample_ids(hladat.SNP.data, requested, hladat.type)
 
     @staticmethod
     def iter_variants(hladat) -> list[str]:
