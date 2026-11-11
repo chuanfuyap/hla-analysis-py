@@ -68,7 +68,13 @@ def _prepare_studies(studies, required, variant_col):
 
 
 def _total_columns(combined):
-    return {source: target for source, target in _SAMPLE_TOTALS.items() if source in combined}
+    columns = {source: target for source, target in _SAMPLE_TOTALS.items()
+               if source in combined and source != "N_total"}
+    # Prefer actual modelling counts; keep direct combiner callers compatible.
+    for source in ("N_used", "N", "N_total"):
+        if source in combined:
+            return {source: "Total N", **columns}
+    return columns
 
 
 def _sample_totals(group, columns):

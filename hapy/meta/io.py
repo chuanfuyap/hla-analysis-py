@@ -1,125 +1,128 @@
-"""
-IO module for the meta-analysis component of hapy.meta.
-
-Reads a txt file containing all the results files to be meta-analysed, each file is separated by a new line. 
-"""
+"""Read current cohort outputs and route AA positions across all studies."""
 from __future__ import annotations
 
-from typing import List, Tuple
 from pathlib import Path
+import numpy as np
 import pandas as pd
-from scipy import stats
 
-_CI = 0.95
-_Z_CI = stats.norm.ppf(1 - (1 - _CI) / 2)  # ~1.96, computed once
 
-def _compute_se(study: pd.DataFrame) -> pd.DataFrame:
-    """Derive SE from 95% CI and filter out non-positive SEs."""
+def _require(study, columns):
+    missing = [column for column in columns if column not in study]
+    if missing:
+        raise ValueError(f"Required input column(s) not found: {missing}")
+
+
+def _sample_columns(study, n_col, case_col, control_col):
+    # Map only the explicitly selected count columns. Do not discover legacy
+    # counts or allow an unrelated count column to override the user's choice.
+    counts = {target: study[source].copy()
+              for source, target in ((n_col, "N_used"), (case_col, "N_case"), (control_col, "N_control"))
+              if source is not None and source in study}
+    study = study.drop(columns=["N_used", "N", "N_total", "N_case", "N_control"], errors="ignore").copy()
+    for target, values in counts.items():
+        study[target] = values
+    return study
+
+
+def _ivw_rows(study, beta, se):
+    if study.empty:
+        return study
+    _require(study, [beta, se])
     study = study.copy()
-    study["SE"] = (study["CI_0.975"] - study["CI_0.025"]) / (2 * _Z_CI)
-    return study[study["SE"] > 0]
+    for column in (beta, se):
+        study[column] = pd.to_numeric(study[column], errors="raise")
+    study = study.dropna(subset=[beta, se])
+    if (not np.isfinite(study[[beta, se]].to_numpy(dtype=float)).all()
+            or study[se].le(0).any()):
+        raise ValueError("IVW coefficients must be finite and standard errors positive and finite.")
+    return study
 
 
-def _compute_se_interaction(study: pd.DataFrame) -> pd.DataFrame:
-    """Derive SE from 95% CI and filter out non-positive SEs."""
-    study = study.copy()
-    study["SE"] = (study["I_CI_0.975"] - study["I_CI_0.025"]) / (2 * _Z_CI)
-    return study[study["SE"] > 0]
+def read_input_files(file_loc, data_type, interaction=False, *,
+                     beta="Beta", se="StdErr", pval="P-value", variant_col="VARIANT",
+                     test_col="TEST", n_col="N_used", case_col="N_case", control_col="N_control",
+                     partner_col="Partner_col", feature_col="Variant_col", sep=","):
+    """Return (IVW cohort tables, Stouffer cohort tables) using configured columns.
 
-def _process_aa(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame | None, pd.DataFrame]:
-    """Split AA results into univariate IVW and omnibus Stouffer inputs."""
-    study = study.copy()
-    if interaction:
-        variant_col = "VARIANT" if "VARIANT" in study else "AA_VARIANT"
-        partner_col = "Partner_col" if "Partner_col" in study else "Anchor_col"
-        study["INTERACTION"] = study[variant_col].astype(str) + "*" + study[partner_col].astype(str)
-        if "LR_p" not in study and "P-value" in study:
-            if "Beta" in study:
-                raise ValueError("AA interaction meta-analysis expects position-level omnibus results, not pairwise coefficients.")
-            study["LR_p"] = study["P-value"]
-    lr_p = study.get("LR_p", pd.Series(float("nan"), index=study.index))
-    omnibus = study[lr_p.notnull()].copy()
-    if interaction:
-        return None, omnibus
-    ivw = study[lr_p.isnull()].copy()
-    if not ivw.empty:
-        ivw = _compute_se(ivw)
-    return ivw, omnibus
+    file_loc lists one independent cohort file per nonblank line. Cohort files
+    use sep (comma by default; use "\t" for TSV). Column arguments name input
+    fields; counts are mapped internally to N_used/N_case/N_control. Missing
+    optional count columns are allowed; None disables a count/feature field.
 
+    Standard AA results require TEST (or test_col). OVR and unlabelled skipped
+    rows are excluded. If any cohort labels a position MULTI, every SINGLE or
+    MULTI row at that position is routed to Stouffer. Remaining SINGLE rows go
+    to IVW. Missing statistics do not contribute. Duplicate position-level rows
+    within a cohort raise an error. No legacy schema or SE-from-CI inference is
+    performed. Caller-selected beta/se/pval/variant column names are preserved.
 
-def _process_hla_snp(study: pd.DataFrame, interaction=False) -> Tuple[pd.DataFrame, None]:
-    """HLA and SNP results: IVW only, derive SE from CI."""
-    if interaction:
-        study = study.copy()
-        partner_col = "Partner_col" if "Partner_col" in study else "Anchor_col"
-        if {"VARIANT", partner_col}.issubset(study.columns):
-            identifier = study["VARIANT"].astype(str)
-            if "Variant_col" in study:
-                encoded = study["Variant_col"]
-                identifier = identifier.where(encoded.isna(), identifier + ":" + encoded.fillna("").astype(str))
-            study["INTERACTION"] = identifier + "*" + study[partner_col].astype(str)
-            # Keep the existing meta engine compatible with both export schemas.
-            for source, target in (("Beta", "I_coef"), ("StdErr", "I_StdErr"),
-                                   ("CI-lower", "I_CI_0.025"), ("CI-upper", "I_CI_0.975")):
-                if target not in study and source in study:
-                    study[target] = study[source]
-        else:
-            study["INTERACTION"] = study['A_variant'] + "*" + study['B_col']
-        return _compute_se_interaction(study), None
-    else:
-        return _compute_se(study), None
-
-_PROCESSORS = {
-    "AA":  _process_aa,
-    "HLA": _process_hla_snp,
-    "SNP": _process_hla_snp,
-}
-
-def read_input_files(
-    file_loc: str,
-    data_type: str,
-    interaction = False, 
-) -> Tuple[List[pd.DataFrame], List[pd.DataFrame]]:
+    AA interaction inputs remain position-level omnibus results, identified by
+    variant and partner. HLA/SNP interaction coefficients use IVW; an optional
+    encoded feature distinguishes multiple columns of the same variant.
     """
-    Read per-cohort results files and prepare them for meta-analysis.
-
-    Parameters
-    ----------
-    file_loc : str
-        Path to a text file where each line is a path to a cohort results CSV.
-    data_type : str
-        One of "AA", "HLA", "SNP".
-
-    Returns
-    -------
-    inv_var_studies : list[pd.DataFrame]
-        Studies prepared for inverse-variance meta-analysis.
-    stouffer_studies : list[pd.DataFrame]
-        Studies prepared for Stouffer's meta-analysis (AA omnibus results only).
-    """
-    if data_type not in _PROCESSORS:
-        raise ValueError(f"Unknown data_type {data_type!r}. Expected one of {list(_PROCESSORS)}.")
-
-    process = _PROCESSORS[data_type]
+    if data_type not in {"AA", "HLA", "SNP"}:
+        raise ValueError(f"Unknown data_type {data_type!r}. Expected AA, HLA or SNP.")
     print(f"Processing {data_type} data")
-
-    inv_var_studies, stouffer_studies = [], []
-
+    studies = []
     seen_paths = set()
     with open(file_loc, "r", encoding="utf-8") as stream:
-        for line in stream:
-            path = line.strip()
-            if not path:
-                continue
-            resolved = Path(path).resolve()
-            if resolved in seen_paths:
-                raise ValueError(f"Duplicate cohort file in input list: {path}")
-            seen_paths.add(resolved)
-            study = pd.read_csv(path)
-            ivw, omnibus = process(study, interaction=interaction)
-            if ivw is not None and not ivw.empty:
-                inv_var_studies.append(ivw)
-            if omnibus is not None and not omnibus.empty:
-                stouffer_studies.append(omnibus)
+        paths = [line.strip() for line in stream if line.strip()]
+    for path in paths:
+        resolved = Path(path).resolve()
+        if resolved in seen_paths:
+            raise ValueError(f"Duplicate cohort file in input list: {path}")
+        seen_paths.add(resolved)
+        study = pd.read_csv(path, sep=sep)
+        _require(study, [variant_col])
+        study = study.dropna(subset=[variant_col]).copy()
+        if data_type == "AA" and not interaction:
+            _require(study, [test_col])
+            labels = study[test_col].astype("string").str.strip().str.upper()
+            unknown = labels.notna() & ~labels.isin(["SINGLE", "MULTI", "OVR"])
+            if unknown.any():
+                raise ValueError(f"{path}: unknown test labels: {labels[unknown].unique().tolist()}")
+            study = study.loc[labels.isin(["SINGLE", "MULTI"])].copy()
+            study[test_col] = labels.loc[study.index]
+        study = _sample_columns(study, n_col, case_col, control_col)
+        identifier = variant_col
+        if interaction and not study.empty:
+            _require(study, [partner_col])
+            study = study.dropna(subset=[partner_col]).copy()
+            if data_type == "AA" and beta in study and study[beta].notna().any():
+                raise ValueError("AA interaction meta-analysis expects position-level omnibus results, not pairwise coefficients.")
+            variant = study[variant_col].astype(str)
+            if data_type != "AA" and feature_col is not None and feature_col in study:
+                encoded = study[feature_col]
+                variant = variant.where(encoded.isna(), variant + ":" + encoded.fillna("").astype(str))
+            study["INTERACTION"] = variant + "*" + study[partner_col].astype(str)
+            identifier = "INTERACTION"
+        if not study.empty and study[identifier].duplicated().any():
+            raise ValueError(f"{path}: cohort contains duplicate variant IDs after excluding OVR/skipped rows.")
+        studies.append(study)
 
-    return inv_var_studies, stouffer_studies
+    # Classify once using every cohort, before selecting rows with usable P-values.
+    # A failed MULTI fit still identifies a multiallelic position conservatively.
+    multi_positions = set()
+    if data_type == "AA" and not interaction:
+        for study in studies:
+            multi_positions.update(study.loc[study[test_col].eq("MULTI"), variant_col])
+
+    ivw_studies, stouffer_studies = [], []
+    for study in studies:
+        if study.empty:
+            continue
+        if data_type == "AA":
+            mask = pd.Series(True, index=study.index) if interaction else study[variant_col].isin(multi_positions)
+            omnibus, single = study.loc[mask].copy(), study.loc[~mask].copy()
+            if not omnibus.empty:
+                _require(omnibus, [pval])
+                omnibus = omnibus.dropna(subset=[pval])
+                if not omnibus.empty:
+                    stouffer_studies.append(omnibus)
+        else:
+            single = study
+        if not single.empty:
+            single = _ivw_rows(single, beta, se)
+            if not single.empty:
+                ivw_studies.append(single)
+    return ivw_studies, stouffer_studies

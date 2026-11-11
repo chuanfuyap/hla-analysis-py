@@ -141,11 +141,11 @@ print(results.head())
 ### Meta-analysis
 
 ```python
-inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA", pval="LR_p", variant_col="VARIANT", prefix="META")
+inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA")
 # `example_studies.txt` refers to a txt file listing path to all the results that will be meta-analysed, this return two separate results where 
 ```
 
-`example_studies.txt`refers to a text file listing the paths to all association results to be meta-analysed. The function returns two separate results: `inv`, containing inverse-variance meta-analysis results for individual variants, and `stouf`, containing Stouffer's meta-analysis results for omnibus tests.
+`example_studies.txt`refers to a text file listing the paths to all association results to be meta-analysed. The function returns `inv` for inverse-variance results and `stouf` for weighted Stouffer results. For AA analysis, any position labelled `MULTI` in a cohort sends all available `SINGLE`/`MULTI` P-values for that position to Stouffer; all-`SINGLE` positions use IVW. OVR rows are excluded. Input column names are configurable; see [meta-analysis](docs/meta_analysis.md).
 
 ### HLA amino acid position plots
 
