@@ -10,9 +10,9 @@ Omnibus:
 - AA-only block omnibus rule enforced
 
 Conditional A-side adjustment:
-- optional same-kind condition_on_a variants are built from adapter_a
+- optional same-kind condition_on variants are built from adapter_a
 - conditioning columns are appended to the covariate dataframe
-- any task whose tested A variant is in condition_on_a is skipped entirely
+- any task whose tested A variant is in condition_on is skipped entirely
 """
 
 from __future__ import annotations
@@ -95,14 +95,14 @@ def _order_interaction_output(out: pd.DataFrame) -> pd.DataFrame:
     return out[first + middle + last]
 
 
-def _normalize_condition_on(condition_on_a) -> list[str]:
-    if condition_on_a is None:
+def _normalize_condition_on(condition_on) -> list[str]:
+    if condition_on is None:
         return []
-    if isinstance(condition_on_a, str):
-        return [condition_on_a]
-    if isinstance(condition_on_a, (list, tuple, set, pd.Index, np.ndarray)):
-        return [str(x) for x in condition_on_a]
-    raise TypeError("condition_on_a must be None, a string, or a list-like of strings.")
+    if isinstance(condition_on, str):
+        return [condition_on]
+    if isinstance(condition_on, (list, tuple, set, pd.Index, np.ndarray)):
+        return [str(x) for x in condition_on]
+    raise TypeError("condition_on must be None, a string, or a list-like of strings.")
 
 
 def _safe_name(name: str) -> str:
@@ -328,7 +328,7 @@ def run_interaction(
     cov_block_cols: list[str] | None = None,
     baseline_covar_cols: list[str] | None = None,
     partner_data: pd.DataFrame | None = None,
-    condition_on_a=None,
+    condition_on=None,
     *,
     variant_filter=None,
     verbose: bool = True,
@@ -356,10 +356,10 @@ def run_interaction(
         partner_data = partner_data.reindex(yser.index)
 
     # ----------------------------
-    # Normalize / validate condition_on_a
+    # Normalize / validate condition_on
     # ----------------------------
-    condition_on_a_list = _normalize_condition_on(condition_on_a)
-    condition_on_a_set = set(condition_on_a_list)
+    condition_on_list = _normalize_condition_on(condition_on)
+    condition_on_set = set(condition_on_list)
 
 
     # baseline covars
@@ -393,8 +393,8 @@ def run_interaction(
         print("----------------", flush=True)
         print(f"STARTING INTERACTION ANALYSES on:\tmode={config.mode}, model={config.model_type}", flush=True)
         print(f"BLOCKS: A={kind}, B={partner_kind}", flush=True)
-        if condition_on_a_list:
-            print(f"conditioning on A-side variants: {condition_on_a_list}", flush=True)
+        if condition_on_list:
+            print(f"conditioning on A-side variants: {condition_on_list}", flush=True)
         print(
             f"parallel: n_jobs={config.n_jobs}, backend={config.backend}, "
             f"batch_size={getattr(config, 'batch_size', 32)}, chunksize={getattr(config, 'chunksize', None)}",
@@ -409,14 +409,14 @@ def run_interaction(
     a_ids = list(adapter_a.iter_variants(hladat))
     a_id_set = set(a_ids)
 
-    missing_condition_ids = [vid for vid in condition_on_a_list if vid not in a_id_set]
+    missing_condition_ids = [vid for vid in condition_on_list if vid not in a_id_set]
     if missing_condition_ids:
         raise ValueError(
-            f"condition_on_a contains variant ids not found in A block ({kind}): {missing_condition_ids}"
+            f"condition_on contains variant ids not found in A block ({kind}): {missing_condition_ids}"
         )
 
     # Conditioning blocks are built separately and are never removed by the filter.
-    a_ids = [vid for vid in a_ids if vid not in condition_on_a_set]
+    a_ids = [vid for vid in a_ids if vid not in condition_on_set]
     if variant_filter is not None:
         a_ids = _filter_a_variants(hladat, kind, a_ids, variant_filter)
         if verbose:
@@ -438,7 +438,7 @@ def run_interaction(
     cond_df, cond_cols = _build_condition_covariates(
         adapter_a=adapter_a,
         hladat=hladat,
-        variant_ids=condition_on_a_list,
+        variant_ids=condition_on_list,
         sample_index=yser.index,
     )
 
@@ -475,7 +475,7 @@ def run_interaction(
     if config.mode == "pairwise":
         tasks: list[tuple[str, str, str, str]] = []
         for a_id, (a_df, a_meta) in a_blocks.items():
-            if a_id in condition_on_a_set:
+            if a_id in condition_on_set:
                 continue
             for b_id, (b_df, b_meta) in b_blocks.items():
                 for ac in a_df.columns:
@@ -560,7 +560,7 @@ def run_interaction(
         # For each variant in B:
         #   - test each column from B as the partner
         for a_id, (a_df, a_meta) in a_blocks.items():
-            if a_id in condition_on_a_set:
+            if a_id in condition_on_set:
                 continue
 
             block_cols = list(a_df.columns)
@@ -615,7 +615,7 @@ def run_interaction(
                 continue
 
             for a_id, (a_df, a_meta) in a_blocks.items():
-                if a_id in condition_on_a_set:
+                if a_id in condition_on_set:
                     continue
                 for partner_col in a_df.columns:
                     # Build filter context for this candidate partner/block pair

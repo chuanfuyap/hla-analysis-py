@@ -134,7 +134,7 @@ results = hp.stats.interaction(
     cov_block_cols=None,
     baseline_covar_cols=None,
     partner_data=partners,
-    condition_on_a=None,
+    condition_on=None,
     verbose=True,
     use_progress_bar=False,
     print_every=500,
@@ -154,7 +154,7 @@ results = hp.stats.interaction(
 | `cov_block_cols` | list of strings or `None` | Covariate columns to test as predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
 | `baseline_covar_cols` | list of strings or `None` | Covariate columns always included as adjustment terms. By default, all covariates are used, except the tested covariates when `partner_kind="COV"`. `[]` selects no baseline covariates. |
 | `partner_data` | `pandas.DataFrame` or `None` | Required for `partner_kind="DF"`. Rows are sample IIDs and columns are partner predictors. Use numeric dosages or explicitly numeric indicators. |
-| `condition_on_a` | `str`, sequence of strings or `None` | Same-kind A-side variant IDs added as adjustment terms. Tasks testing a listed A variant are excluded. |
+| `condition_on` | `str`, sequence of strings or `None` | Same-kind A-side variant IDs added as adjustment terms. Tasks testing a listed A variant are excluded. |
 | `verbose` | `bool`, default `True` | Print scheduled task counts, execution settings, progress and timing. |
 | `use_progress_bar` | `bool`, default `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
 | `print_every` | `int`, default `500` | Completed tasks between periodic progress messages. |
@@ -264,7 +264,7 @@ main effect is already included. To avoid unrelated missing-value exclusions,
 pass a covariate table containing the selected interacting predictors and the
 adjustment columns you need.
 
-Conditioning with `condition_on_a` works with covariate interactions too; those
+Conditioning with `condition_on` works with covariate interactions too; those
 genotype columns enter as additional baseline adjustment terms. Covariate B
 blocks are identified as `COV_BLOCK` in filter contexts; select a particular
 exposure using `partner_col` in omnibus mode or `b_col` in pairwise mode.
@@ -333,11 +333,14 @@ filtered = hp.stats.interaction(
 
 ## Conditional interaction analysis
 
+`condition_on` adjusts for variants from the HLA block selected by `kind`,
+matching the argument name used by standard association analysis.
+
 ```python
 conditional = hp.stats.interaction(
     hladat, config, kind="AA", partner_kind="DF",
     partner_data=partners, y=phenotype, covar=covar,
-    condition_on_a="AA_DRB1_231_32548054",
+    condition_on="AA_DRB1_231_32548054",
 )
 ```
 

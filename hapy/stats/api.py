@@ -223,7 +223,7 @@ def interaction(
     cov_block_cols: list[str] | None = None,
     baseline_covar_cols: list[str] | None = None,
     partner_data: pd.DataFrame | None = None,
-    condition_on_a=None,
+    condition_on=None,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 500,
@@ -257,10 +257,10 @@ def interaction(
 
     Conditional A-side adjustment
     -----------------------------
-    - condition_on_a:
+    - condition_on:
         Optional same-kind A-side variant(s) to add to the covariate dataframe as adjustment terms.
         These are built using the same adapter as A.
-        Any task whose tested A variant is itself listed in condition_on_a is skipped entirely.
+        Any task whose tested A variant is itself listed in condition_on is skipped entirely.
 
     Parameters
     ----------
@@ -290,7 +290,7 @@ def interaction(
         Required if partner_kind="DF".
         IID-indexed dataframe (index must match famfile IID / modelling IID set).
         Columns are treated as block B features (each column interacts with each A column in pairwise mode).
-    condition_on_a:
+    condition_on:
         Optional A-side same-kind variant id or list of variant ids to include as conditioning covariates.
         Any tested task whose A-side variant is in this set is not modeled.
     verbose, use_progress_bar, print_every:
@@ -342,7 +342,7 @@ def interaction(
         cov_block_cols=cov_block_cols,
         baseline_covar_cols=baseline_covar_cols,
         partner_data=partner_data,
-        condition_on_a=condition_on_a,
+        condition_on=condition_on,
         verbose=verbose,
         use_progress_bar=use_progress_bar,
         print_every=print_every,
