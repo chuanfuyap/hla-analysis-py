@@ -175,14 +175,14 @@ def stouffers_meta_studies(studies: List[pd.DataFrame], pval: str,
         weights = group["_w"].to_numpy(dtype=float)
         # Scaling preserves relative weights and avoids squaring huge counts.
         weights = weights / weights.max()
-        result = stats.combine_pvalues(
+        z_meta, p_meta = stats.combine_pvalues(
             group[pval].to_numpy(dtype=float),
             method="stouffer",
             weights=weights,
         )
 
-        z_meta = float(result.statistic)
-        p_meta = float(result.pvalue)
+        z_meta = float(z_meta)
+        p_meta = float(p_meta)
         log_p = float(stats.norm.logsf(z_meta) / np.log(10.0))
         rows.append({
             variant_col: variant, "N studies": len(group),
