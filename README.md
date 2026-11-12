@@ -56,11 +56,18 @@ pip install .
 
 ### PLINK input
 
-> When using imputed data from Michigan server, you can convert to PLINK file formats (v1 `bilfe` or v2 `pgen`) with PLINK2 which can be read by `hapy`. It is preferable to use `pgen` format as it would retain the imputation accuracy as well as fratctional dosage values.
->
-> If `.raw` file (exported by PLINK with `--export A`) is preferred, try to retain `pgen`'s pvarfile to have imputation accuracy.
->
-> `bfile` format is also implemented but should be avoided as it loses fractional dosage value, giving only 0/1/2 (hard) counts and imputation accuracy information is not maintained.
+For imputed data, PGEN is preferred when fractional dosages are stored in the
+file. The BED/BIM/FAM (`bfile`) format stores hard genotype calls rather than
+fractional dosages. RAW input preserves the dosage values exported into it, but
+with reduced numerical precision due to fewer decimal places.
+
+Imputation-quality scores must be retained separately, for example in a PVAR
+column or INFO field, or an external R² file. A PVAR file does not necessarily
+contain quality scores, and supplying one alone does not enable quality
+filtering. Request filtering with `pvar_R2_column` or `filter_R2`, together with
+`R2_minimum`; see the [association guide](docs/association.md) for examples.
+RAW can also be read without PVAR, but imputation-quality filtering requires a
+suitable quality source.
 
 To read PLINK files, use `read_plink` and choose a PLINK input format:
 
@@ -107,7 +114,7 @@ hladat.HLA.data # returns HLA allele variant by sample matrix in pandas DataFram
 
 hladat.SNP.data # returns SNP variant by sample matrix in pandas DataFrame format
 
-hladat.SNPS.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by sample matrix in pandas DataFrame format 
+hladat.SNP.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by sample matrix in pandas DataFrame format
 
 ```
 
@@ -149,8 +156,12 @@ inv, stouf = hp.meta.meta_analyse("example_studies.txt", data_type="AA")
 
 ### HLA amino acid position plots
 
-Use `hp.vis.plot_aa_association()` for genomic (manhattan) association plots and
-`hp.vis.plot_aa_interaction(kind="scatter3d" or "heatmap")` for genetic (GxG) interactions.
+Use `hp.vis.plot_aa_association()` for AA position association plots and
+`hp.vis.plot_aa_interaction()` with `kind="scatter3d"` for
+position-level genetic (G×G) interactions. Both functions default to numeric
+amino acid sequence positions within one HLA gene; select it with, for example,
+`genes="DRB1"`. Use `x_axis="genomic"` for physical genomic spacing or
+`x_axis="equally_spaced"` for evenly spaced positions across genes.
 See [visualisation documentation](docs/visualisation.md) and
 [synthetic examples](examples/visualisation/plot_examples.py).
 
