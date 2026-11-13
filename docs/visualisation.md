@@ -1,8 +1,19 @@
 # HLA amino acid position visualisation
 
-`hp.vis.plot_aa_association()` and `hp.vis.plot_aa_interaction()` return `(fig, ax)`.
+Visualisation plays an important role in genetic association studies, helping 
+researchers identify association signals, explore patterns across genomic regions 
+and communicate their findings. While Manhattan plots provide an overview of 
+association significance across genetic positions, three-dimensional (3D) interaction 
+plots offer a way to visualise interactions between HLA amino acid variation and other 
+genetic components.
 
-Matplotlib is the only plotting dependency. Plots are not displayed unless `show=True`.
+To facilitate the interpretation and presentation of these results, `hapy` provides 
+two visualisation functions: a Manhattan plot for HLA amino acid associations `hp.vis.plot_aa_association()`
+and a 3D interaction plot `hp.vis.plot_aa_interaction()` for exploring genetic interaction signals.
+
+Both of them returns `(fig, ax)`.
+
+[Matplotlib](https://matplotlib.org/stable/api/markers_api.html) is the only plotting dependency. Plots are not displayed unless `show=True`.
 
 ## Input and significance
 
@@ -13,11 +24,16 @@ across multiple genes. IDs are case-normalised for gene matching. No genome
 assembly or coordinate conversion is inferred; `reference_build="GRCh38"` adds a
 label only. Coordinates must all use the same reference build supplied by you.
 
-Only position-level tests are accepted. Residue/exon suffixes are rejected because
+Only position-level tests are accepted. An exon annotation in a position ID is
+accepted, including mapped IDs such as `AA_DRB1_80_32584153_exon2`. Residue suffixes are rejected because
 a residue test cannot be assumed to represent an omnibus position test. Duplicate
 rows for a position raise an error. Obtain position-level tests from the amino acid association
 analysis; this module never combines residue P-values. Different genomic coordinates
-are preserved even if their gene and sequence position are the same.
+are preserved even if their gene and sequence position are the same. Explicit
+`NA` coordinates are supported for sequence-position plots; genomic layouts
+require validated coordinates. Mapped insertions use labels such as `52i1`;
+sequence plots place these between flanking positions and print an INFO note
+that this is display spacing, not a fractional sequence distance.
 
 For current standard AA and AA omnibus interaction results, explicitly select
 `pval_col="P-value"` and `variant_col="VARIANT"`. Pairwise interaction results also use `P-value`, but represent individual

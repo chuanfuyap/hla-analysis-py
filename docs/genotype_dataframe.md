@@ -1,10 +1,23 @@
 # Reading PLINK genotype data for interaction analysis
 
+Genetic analyses often require integrating data from different sources, particularly 
+when investigating interactions between HLA amino acid variation and genetic variants
+elsewhere in the genome. While genotype data are commonly stored in PLINK formats, 
+these files need to be converted into a suitable structure for downstream analyses.
+
+To simplify this process, `hapy` provides `read_genotype`, a utility function 
+that reads PLINK genotype files and converts them into pandas DataFrames, allowing them 
+to be readily used in genetic interaction analyses and other downstream applications.
+
+## `read_genotype()`
+
 `hp.read_genotype()` reads PLINK PGEN, BED/BIM/FAM (bfile), or RAW input into a pandas
 DataFrame instead of an `HLAdata` object. Sample IIDs form the index and original
 variant IDs form the columns. Sample IDs remain strings, including leading zeros.
 
-The PGEN file format is the preferred option among the three, as it preserves fractional dosages with the highest precision. The BFILE format is the least preferred, as it converts dosages into hard genotype calls.
+The PGEN file format is the preferred option among the three, as it preserves fractional 
+dosages with the highest precision. The BFILE format is the least preferred, as it 
+converts dosages into hard genotype calls.
 
 For RAW input, the returned DataFrame column names have the final
 `_COUNTED_ALLELE` suffix removed: `rs123_A` becomes `rs123`, and
@@ -76,14 +89,9 @@ results = hp.interaction(
 )
 ```
 
-hapy aligns the partner matrix to phenotype sample IDs; missing required values
+`hapy` aligns the partner matrix to phenotype sample IDs; missing required values
 are handled by the existing interaction analysis complete-case processing.
 
 The returned DataFrame is dense. For large filesets, select the partner variants
 before decoding to limit memory use. Apply imputation quality and other desired
 QC filters upstream; this reader performs no automatic QC filtering.
-
-This function currently supports PLINK formats only. VCF support can be added
-later through the same `read_genotype()` API; it is not implemented yet.
-The initially introduced `read_pgen()` function has been renamed to
-`read_genotype()`; update calls to use the new name.

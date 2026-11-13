@@ -1,5 +1,17 @@
 # Meta-analysis
 
+Sharing individual-level genetic data is not always possible due to privacy, 
+ethical and data access restrictions. However, summary statistics from association 
+analyses can often be shared, allowing results from multiple studies or cohorts 
+to be combined through meta-analysis. By integrating evidence across datasets, 
+meta-analysis can increase statistical power and improve the detection of genetic
+associations.
+
+To facilitate this, `hapy` provides functions for combining association results 
+across studies or cohorts using summary statistics.
+
+## `meta_analyse()`
+
 `hp.meta.meta_analyse()` combines independent cohort result tables and returns `(ivw, stouffer)`. Each argument is a pandas DataFrame, or `None` when there are no applicable inputs for that method. A result requires at least two contributing cohorts for the position or interaction.
 
 Create a text file with one cohort results path per line:
@@ -15,8 +27,6 @@ Then run:
 ```python
 ivw, stouffer = hp.meta.meta_analyse("studies.txt", data_type="AA")
 ```
-
-The default input columns match current association output: `VARIANT`, `TEST`, `Beta`, `StdErr`, `P-value`, `N_used`, `N_case` and `N_control`. Legacy column names are not detected automatically, and standard errors are not reconstructed from confidence intervals.
 
 ## AA position routing
 
@@ -82,10 +92,10 @@ Optional count columns may be absent. Set a count parameter to `None` to disable
 - IVW uses inverse squared standard errors and reports a combined coefficient, standard error and two-sided P-value.
 - Stouffer uses `z = norm.isf(P)` and sample-size weights. Valid positive case/control counts use `sqrt(N_eff)`, where `N_eff = 4 / (1/N_case + 1/N_control)`. Otherwise, a positive selected sample count uses `sqrt(N_used)`. Without usable counts, the weight is one.
 
-Stouffer combines evidence without imposing a residue effect direction. Its transform accepts valid cohort P-values from both SINGLE and MULTI position tests; it does not divide them by two. Weights should be independent of the observed P-values.
+Stouffer combines evidence without imposing a residue effect direction. Its transform accepts valid cohort P-values from both SINGLE and MULTI position tests; it does not divide them by two. Weights should be independent of the observed P-values. `hapy` currently uses [scipy's implementation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.combine_pvalues.html)
 
 Both outputs include `N studies` and available cohort totals. `Total N` sums the selected modelling sample counts for contributing rows. Totals are missing when a contributing cohort lacks the corresponding count, rather than reporting a partial sum as complete. Combined `META_log10P` is minus log10(P) and remains available when the combined floating-point P-value underflows. Exact zero input P-values remain unsupported.
 
 ## Interaction tables
 
-AA interaction meta-analysis continues to accept position-level omnibus results, using `VARIANT` and `Partner_col` to build the `INTERACTION` key. AA pairwise/residue coefficients are not accepted by this position-level route. HLA/SNP pairwise interactions use the selected `Beta`/`StdErr` columns for IVW; an available `Variant_col` distinguishes encoded features. There is no automatic detection of historical interaction column names: supply custom names explicitly when needed.
+AA interaction meta-analysis continues to accept position-level omnibus results, using `VARIANT` and `Partner_col` to build the `INTERACTION` key. AA pairwise/residue coefficients are not accepted by this position-level route. HLA/SNP pairwise interactions use the selected `Beta`/`StdErr` columns for IVW; an available `Variant_col` distinguishes encoded features. 

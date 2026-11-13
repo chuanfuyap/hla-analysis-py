@@ -1,12 +1,17 @@
 # Interaction analysis
 
+Beyond main-effect association testing, exploring interactions between genetic 
+variants (G×G) and between genetic variants and environmental factors (G×E) can 
+provide further insights into how genetic variation and environmental exposures 
+jointly influence disease susceptibility. To facilitate these analyses, `hapy` 
+provides functions for testing interactions between HLA components and other 
+genetic or environmental factors.
 
-
-`hp.stats.interaction()` tests interactions between two predictor blocks, called
-A and B. Block A comes from an `HLAdata` object. Block B can come from the same
-object, an external genotype DataFrame, or selected covariate columns.
-`hp.interaction()` is the same function. Results are returned as a pandas
-DataFrame and are not saved automatically.
+`hp.stats.interaction()` tests interactions between HLA components specified by 
+`kind` and other predictors specified by `partner_kind`. The `kind` parameter 
+selects HLA data from an `HLAdata` object**, while `partner_kind` specifies the 
+interacting component, which can be another HLA component, selected covariate 
+columns, or an external pandas DataFrame (typically containing genetic data).
 
 For HLA amino acid position interactions, use `mode="one_vs_block_omnibus"` to
 test an AA position jointly against each partner predictor. Use
@@ -156,7 +161,7 @@ results = hp.stats.interaction(
 | `variant_filter` | callable or `None` | `None` | Select focal variants before genotype construction. Does not filter partner predictors or conditioning terms; subset partner data separately. |
 | `pair_filter` | callable or `None` | `None` | Function receiving a candidate interaction context and returning `True` to keep or `False` to exclude it, after genotype blocks are constructed. |
 | `cov_block_cols` | list of `str` or `None` | `None` | Covariate columns tested as interacting predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
-| `baseline_covar_cols` | list of `str` or `None` | `None` | Baseline adjustment columns. `None` selects all covariates except the tested COV partner columns. `[]` selects no baseline covariates. |
+| `baseline_covar_cols` | list of `str` or `None` | `None` | Baseline adjustment columns. `None` adjusts for all other covariates in each test, including other `cov_block_cols` columns. The current partner is included once as a main effect. `[]` selects no baseline covariates. |
 | `partner_data` | `pandas.DataFrame` or `None` | `None` | External IID-indexed partner predictors. Required for `partner_kind="DF"`; use numeric dosages or numeric indicators. |
 | `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind focal variant IDs included as adjustment terms. Conditioning variants are excluded from focal testing. For AA, use position IDs without residue suffixes. |
 | `residue` | `bool` | `False` | In pairwise mode, add an available QC-passing reference AA residue without duplicating existing tests. Requires AA on at least one side; other modes raise `ValueError`. |
@@ -206,8 +211,9 @@ differ between interaction tests. `hapy` does not impute these missing values.
 ## Interacting with a covariate: AA positions × SEX
 
 Use `partner_kind="COV"` to test AA positions against columns already in your covariate
-table. `cov_block_cols` selects the interacting columns; all other covariates
-are baseline adjustment terms by default. There is no need to create a separate
+table. `cov_block_cols` selects columns to test separately. In each test, all other
+covariates, including the other selected interacting columns, are baseline
+adjustment terms by default. There is no need to create a separate
 partner DataFrame.
 
 With SEX in the IID-indexed `covar` table and an IID-indexed phenotype Series
@@ -254,6 +260,9 @@ still be categorical in either mode.
 
 ### Several interacting covariates
 
+Supplying a list of `covar` column names test each of the covariate in order, i.e. 
+they are tested separately.
+
 ```python
 results = hp.stats.interaction(
     hladat, config, kind="AA", partner_kind="COV",
@@ -262,17 +271,12 @@ results = hp.stats.interaction(
 )
 ```
 
-
 Use `baseline_covar_cols` to name the desired baseline terms explicitly, for
-example `["age", "PC1", "PC2"]`. Do not add the tested partner to that list: its
-main effect is already included. To avoid unrelated missing-value exclusions,
+example `["age", "PC1", "PC2"]`. The current tested partner is removed from that list for its test because its
+main effect is already included. Other selected partners remain adjustments if
+they are in the list. To avoid unrelated missing-value exclusions,
 pass a covariate table containing the selected interacting predictors and the
 adjustment columns you need.
-
-Conditioning with `condition_on` works with covariate interactions too; those
-genotype columns enter as additional baseline adjustment terms. Covariate B
-blocks are identified as `COV_BLOCK` in filter contexts; select a particular
-exposure using `partner_col` in omnibus mode or `b_col` in pairwise mode.
 
 ## Selecting interaction tests
 
@@ -352,12 +356,10 @@ conditional = hp.stats.interaction(
 Conditioning variant IDs must exist in the A block. Their eligible genotype
 columns enter as baseline adjustment terms, and tasks
 where the tested A variant is a conditioning variant are excluded. They are not
-additional interacting predictors. This option adjusts for A-side variants
-only; it does not automatically remove tasks where the same ID occurs on B.
+additional interacting predictors. This option adjusts for HLA-side variants
+only; it does not automatically remove tasks where the same ID occurs on partner block.
 The current interaction runner omits conditioning blocks with no eligible
 columns, so a requested empty block does not contribute adjustment terms.
-
-
 
 ## Reading the interaction results
 
@@ -380,12 +382,6 @@ results do not include a `TEST` column; the test is determined by `config.mode`.
 | `Partner_AF` | Frequency of the selected genotype partner, calculated as mean dosage divided by two. External `partner_data` uses this genotype-dosage convention. |
 | `Partner_mean` | Mean of a numeric interacting covariate. For a numeric 0/1 predictor, this is the proportion coded 1. |
 | `Partner_proportion` | Proportion in the second category for a binary categorical or boolean interacting covariate. Check the category ordering when interpreting this value. |
-
-Frequencies and the selected partner's summary use the samples included in that
-interaction model and can differ between tests because of missing data. AA
-dosage frequencies are calculated without renormalising the remaining residues
-after QC filtering. Copied partner annotation fields are distinct from the
-selected predictor's `Partner_AF`/mean/proportion summary.
 
 ### Pairwise interaction statistics
 

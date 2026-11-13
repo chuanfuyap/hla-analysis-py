@@ -1,8 +1,21 @@
 # Survival analysis
 
+While conventional genetic association analyses investigate whether genetic variation 
+is associated with disease susceptibility, they do not account for when an event occurs. 
+Time-to-event (survival) analysis extends these investigations by examining how genetic
+variation influences the timing of events, such as disease onset or progression, while 
+accounting for censored observations, where the event has not been observed during an 
+individual's follow-up period.
+
+To facilitate these analyses, `hapy` provides functions for survival analysis of 
+HLA amino acid variation, enabling the investigation of associations between HLA 
+components and time-to-event outcomes.
+
 `hp.stats.survival()` runs Cox regression for the AA, HLA or SNP block of a loaded
 `HLAdata` object. `hp.survival()` is the same function. It returns a pandas
 DataFrame; results are not saved automatically.
+
+The underlying Cox proportional hazards models are fitted using the [lifelines](https://lifelines.readthedocs.io/en/latest/) Python package, supporting both static and time-varying covariates.
 
 Without `dynamic_covar`, hapy uses `lifelines.CoxPHFitter`. Supplying time-varying
 covariates selects `lifelines.CoxTimeVaryingFitter` and constructs start–stop

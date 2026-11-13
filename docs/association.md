@@ -1,8 +1,21 @@
 # Amino acid position association analysis
 
+The availability of HLA imputation methods and the ability to map HLA alleles to 
+their corresponding amino acid sequences have made it possible to investigate 
+genetic associations at the amino acid level. This provides an opportunity to move 
+beyond conventional HLA allele associations and identify specific amino acid positions 
+that may contribute to disease susceptibility.
+
+However, unlike conventional genetic variants, HLA amino acid positions can contain 
+multiple residues, requiring methods that account for their multi-allelic nature. 
+To facilitate HLA fine-mapping, `hapy` provides a range of association testing 
+functions designed specifically for analysing amino acid variation.
+
 `hp.analyse()` runs association tests for one phenotype using the AA, HLA
 or SNP block of an `HLAdata` object. It returns a pandas DataFrame; results are
 not saved automatically.
+
+The underlying linear and logistic regression models are fitted using the [statsmodels](https://www.statsmodels.org/stable/index.html) Python package, supporting both single-variant association tests and multi-allelic omnibus tests.
 
 Omnibus tests reuse compatible baseline null models. Different complete-case samples or baseline designs trigger a local null fit.
 
@@ -170,7 +183,7 @@ sample counts across tested positions. `hapy` does not impute these missing valu
 ## What is tested?
 
 The genotype adapter constructs columns for the selected position. The number
-of fitted genotype columns determines the test:
+of genotype columns determines the test:
 
 - **SINGLE**: one genotype column. Fit phenotype against genotype and covariates.
   The reported P-value is a two-sided coefficient test: a Wald z-test for
@@ -185,8 +198,6 @@ are relative to that reference. The omnibus P-value tests the genotype block
 jointly, rather than choosing the smallest residue-specific P-value.
 
 ## Reading the results
-
-`N_used` reports the final number of complete-case samples for each test.
 
 The return value is a pandas DataFrame with position IDs such as
 `AA_DPB1_69_33048646` in `VARIANT`. Use `VARIANT` to identify or join 
@@ -210,22 +221,6 @@ results. Entirely missing columns and some zero-valued housekeeping columns may 
 Model warnings are not suppressed or automatically copied into `INFO`.
 Unexpected fitting exceptions can still stop analysis; `INFO` records the
 explicit checks described above.
-
-
-Survival results also keep `INFO` as the last column. It is missing when the
-explicit checks pass. Reasons include `not converged` for a lifelines
-`ConvergenceError`, `singular matrix`, `numerical fitting error`, non-finite
-coefficients/standard errors/log-likelihood, and `feature not estimated`.
-Multi-column Cox tests identify the `null model` or `full model` in fit messages.
-No usable genotype columns, no complete-case samples or no observed events are
-reported before fitting. Affected rows retain their sample counts and missing
-estimates, allowing other variants to continue.
-
-Lifelines does not provide the same public convergence flag as the standard
-logistic models. Warning-only convergence concerns remain visible as warnings
-and are not copied into `INFO`; a missing `INFO` means the explicit checks
-passed, not that every convergence concern has been ruled out. Invalid input or
-unexpected programming errors can still stop execution.
 
 ## Conditional association
 
@@ -315,8 +310,6 @@ Parse labelled MULTI coefficients before numerical calculations; do not apply
 `np.exp()` directly to a whole mixed numeric/string `Beta` column. The omnibus
 P-value remains a joint test, even when individual coefficients are exported.
 
-F
-
 ## Optional residue one-vs-rest tests
 
 Use `residue=True` with `hp.stats.analyse()` and `kind="AA"` to append residue tests to the existing position-level results.
@@ -330,6 +323,15 @@ position_results = results[results["TEST"].isin(["SINGLE", "MULTI"])]
 residue_results = results[results["TEST"] == "OVR"]
 ```
 
-At a multiallelic position, the existing `MULTI` row is retained. Each QC-passing residue then gets a separate `Y ~ covariates + residue_dosage` test through the existing univariate model. The comparison is that residue versus all other residues; it is not a comparison against only `Ref_AA`.
+At a multiallelic position, the existing `MULTI` row is retained. Each QC-passing 
+residue then gets a separate `Y ~ covariates + residue_dosage` test through the 
+existing univariate model. The comparison is that residue versus all other residues; 
+it is not a comparison against only `Ref_AA`.
 
-For biallelic positions, the existing `SINGLE` row already tests one residue, so only the opposite residue is appended. Additional OVR rows use `Ref_AA="tested: S"` to identify the tested residue, without a reference label. When the dosages sum to two on the same model samples and the fitted model has a supported full-rank intercept design, the opposite result is inferred without another fit. Beta and the signed statistic change sign; the confidence interval becomes `[-old_upper, -old_lower]`. P-value, standard error and sample counts are retained. Otherwise, the opposite dosage is fitted explicitly.
+For biallelic positions, the existing `SINGLE` row already tests one residue, 
+so only the opposite residue is appended. Additional OVR rows use `Ref_AA="tested: S"` 
+to identify the tested residue, without a reference label. When the dosages sum to two 
+on the same model samples and the fitted model has a supported full-rank intercept design, 
+the opposite result is inferred without another fit. Beta and the signed statistic 
+change sign; the confidence interval becomes `[-old_upper, -old_lower]`. P-value, 
+standard error and sample counts are retained. Otherwise, the opposite dosage is fitted explicitly.
