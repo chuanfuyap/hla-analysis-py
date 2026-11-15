@@ -149,6 +149,8 @@ def _run_omnibus_task(task, *, state: dict) -> dict:
     a_blocks = state["a_blocks"]
     b_blocks = state["b_blocks"]
     yser = state["yser"]
+    if state["partner_kind"] == "COV":
+        state = _covariate_partner_state(state, task[4])
     covdf_model = state["covdf_model"]
     baseline_covars_model = state["baseline_covars_model"]
     kind = state["kind"]
@@ -295,9 +297,30 @@ def _aa_pair_metadata(row, state, a_id, ac, b_id, bc, index):
             row[f"{prefix}Ref_AA"] = f"tested: {full.attrs['residue_labels'][col]}"
 
 
+def _covariate_partner_state(state, partner):
+    """Keep other adjustment columns while adding the tested COV partner once."""
+    if state["partner_kind"] != "COV" or state.get("cov_partner") == partner:
+        return state
+    local = dict(state)
+    local["cov_partner"] = partner
+    local["covdf_model"] = state["covdf_model"].drop(columns=[partner], errors="ignore")
+    local["baseline_covars_model"] = [c for c in state["baseline_covars_model"] if c != partner]
+    return local
+
+
 def _run_residue_pairs(task, state):
     """Keep all residue combinations for a position pair in the existing worker."""
     a_id, pairs, b_id, _ = task
+    if state["partner_kind"] == "COV" and "cov_partner" not in state:
+        rows = {}
+        for bc in dict.fromkeys(bc for ac, bc in pairs):
+            selected = tuple(pair for pair in pairs if pair[1] == bc)
+            local = _covariate_partner_state(state, bc)
+            for key in ("b_blocks", "b_full_blocks"):
+                frame, meta = state[key][b_id]
+                local[key] = {b_id: (frame[[bc]], meta)}
+            rows.update(zip(selected, _run_residue_pairs((a_id, selected, b_id, None), local)))
+        return [rows[pair] for pair in pairs]
     a_full, _ = state["a_full_blocks"][a_id]
     b_full, _ = state["b_full_blocks"][b_id]
     # Reuse one ABT when all residue/partner columns share a missingness mask.
@@ -379,6 +402,7 @@ def _fit_residue_pair(a_id, ac, b_id, bc, source, reverse, fitted, state, prepar
 def _run_pairwise_task(task: tuple[str, str, str, str], *, state: dict, _details=False, _prepared=None) -> dict:
     if isinstance(task[1], tuple):
         return _run_residue_pairs(task, state)
+    state = _covariate_partner_state(state, task[3])
     a_blocks = state["a_blocks"]
     b_blocks = state["b_blocks"]
     yser = state["yser"]
@@ -512,7 +536,7 @@ def run_interaction(
         baseline_covars = (
             list(baseline_covar_cols)
             if baseline_covar_cols is not None
-            else [c for c in covdf.columns if c not in set(cov_block_cols)]
+            else list(covdf.columns)
         )
     else:
         baseline_covars = []
@@ -589,7 +613,7 @@ def run_interaction(
     )
 
     covdf_model = (
-        covdf.drop(columns=cov_block_cols)
+        covdf[baseline_covars].copy()
         if partner_kind == "COV"
         else covdf
     )

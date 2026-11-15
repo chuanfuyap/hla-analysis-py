@@ -293,7 +293,7 @@ def interaction(
         Optional list of covariate columns to always include as baseline adjustment.
         If omitted:
           - when partner_kind not in {"COV"}: baseline = all covar columns
-          - when partner_kind == "COV": baseline = all covar columns EXCEPT cov_block_cols
+          - when partner_kind == "COV": baseline = all covar columns except the current tested partner
         (For partner_kind="DF", baseline defaults to all covar columns.)
     partner_data:
         Required if partner_kind="DF".

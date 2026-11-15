@@ -23,6 +23,7 @@ Currently supported input formats include:
 
 ## Features
 
+- HLA allele-to-amino-acid conversion with locally built IPD references
 - Amino-acid omnibus association testing
 - Classical HLA allele association analysis
 - SNP-level association analysis
@@ -117,6 +118,10 @@ hladat.SNP.data # returns SNP variant by sample matrix in pandas DataFrame forma
 hladat.SNP.extradata # returns SNP (that has SNP_ or SNPS_ prefix.) variant by sample matrix in pandas DataFrame format
 
 ```
+
+### HLA allele calls
+
+Convert **HLA allele calls into amino acid dosages or `HLAdata` objects**, while preserving **within-gene phasing** for amino acid motif analysis. See [allele mapping and reference building](docs/allele_mapping.md) for reference preparation, genomic coordinate mapping and usage instructions.
 
 ### Running association analyses
 

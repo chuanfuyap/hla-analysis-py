@@ -6,7 +6,7 @@ import warnings
 import numpy as np
 import pandas as pd
 
-_AA = re.compile(r'^AA_([A-Za-z0-9]+)_(-?\d+)_(\d+)$')
+_AA = re.compile(r'^AA_([A-Za-z0-9]+)_(-?\d+(?:i[1-9]\d*)?)_(NA|\d+)(?:_exon(?:NA|\d+))?$')
 _PARTNER = re.compile(r'^(?:chr)?([0-9]+|X|Y|MT|M)[:_](\d+)(?:[:_].*)?$', re.I)
 _LEGACY = re.compile(r'^(?:SNP|SNPS)_[^_]+_([0-9]+|X|Y|MT|M)_(\d+)(?:_.*)?$', re.I)
 
@@ -14,15 +14,17 @@ _LEGACY = re.compile(r'^(?:SNP|SNPS)_[^_]+_([0-9]+|X|Y|MT|M)_(\d+)(?:_.*)?$', re
 def parse_aa_identifier(value):
     """Parse an exact AA_GENE_SEQUENCEPOSITION_GENOMICPOSITION position ID.
 
-    Suffixes are rejected: a residue-specific row is not a position-level test.
-    Coordinates are returned as supplied; no reference assembly is inferred.
+    Optional exon annotations and explicit NA genomic coordinates are accepted.
+    Residue suffixes are rejected. Insertions use the unambiguous position label
+    52i1 (first alignment insertion after 52). No assembly is inferred.
     """
     match = _AA.fullmatch(str(value))
-    if not match or int(match[3]) <= 0:
+    if not match or (match[3] != "NA" and int(match[3]) <= 0):
         raise ValueError(f"Invalid AA position identifier {value!r}; expected "
-                         "AA_GENE_AAPOS_GENOMICPOS with a positive genomic coordinate. "
-                         "Residue/exon suffixes are not accepted as position-level tests.")
-    return match[1].upper(), int(match[2]), int(match[3])
+                         "AA_GENE_AAPOS_GENOMICPOS with a positive genomic coordinate or explicit NA. "
+                         "Residue suffixes are not accepted as position-level tests; an exon annotation is allowed.")
+    position = match[2] if "i" in match[2] else int(match[2])
+    return match[1].upper(), position, np.nan if match[3] == "NA" else int(match[3])
 
 
 def parse_partner_identifier(value):
@@ -208,7 +210,7 @@ def select_hits(frame, highlights, highlight_top, interaction=False):
             size = 3 if interaction else 2
             if len(hit) != size:
                 raise ValueError(f'Highlight must have {size} elements.')
-            found = (frame.gene.eq(str(hit[0]).upper()) & frame.aa_pos.eq(int(hit[1]))).to_numpy()
+            found = (frame.gene.eq(str(hit[0]).upper()) & frame.aa_pos.eq(str(hit[1]) if "i" in str(hit[1]) else int(hit[1]))).to_numpy()
             if interaction:
                 found &= frame.y.eq(int(hit[2])).to_numpy()
         if not found.any():

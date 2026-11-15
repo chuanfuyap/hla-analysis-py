@@ -38,8 +38,7 @@ The example files are in `examples/association`:
 
 This is a small demonstration dataset, with 7 cases and 11 controls. Its P-values
 and effect estimates illustrate software usage rather than stable population
-estimates. Some fitted models may be unstable in such a small dataset; inspect
-`INFO` alongside the results.
+estimates. 
 
 ## Quick start
 
@@ -218,7 +217,6 @@ results. Entirely missing columns and some zero-valued housekeeping columns may 
 | `INFO` | Blank or missing for successful tests. `insufficient variation` identifies AA positions with no eligible genotype columns after sample subsetting and allele-frequency processing. Fit diagnostics can instead report `not converged`, `non-finite coefficients`, `non-finite standard errors` or `non-finite log-likelihood`. MULTI diagnostics identify the null or full model. Failed checks leave test estimates missing. |
 | `COND_KIND`, `COND_VARIANTS`, `N_COND_VARIANTS` | Selected block kind, semicolon-separated conditioning variant IDs and number of conditioning variants. Present when applicable. |
 
-Model warnings are not suppressed or automatically copied into `INFO`.
 Unexpected fitting exceptions can still stop analysis; `INFO` records the
 explicit checks described above.
 

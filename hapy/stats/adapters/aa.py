@@ -153,6 +153,14 @@ class AAAdapter:
         else:
             haplodf, AAcount, refAA, aalist, _ = obt_haplo_hard(aadf, retain_reference=retain_reference)
 
+        # Mapping retains monomorphic positions; honour the existing helper QC
+        # outcome before attempting a model with a constant dosage column.
+        model_columns = list(haplodf.attrs.get("test_columns", haplodf.columns))
+        if AAcount < 2 or not any(haplodf[c].nunique(dropna=True) > 1 for c in model_columns):
+            haplodf = haplodf.iloc[:, :0]
+            haplodf.attrs["test_columns"] = ()
+            haplodf.attrs["reference_column"] = None
+
         haplodf = haplodf.sort_index()
         test_columns = haplodf.attrs.get("test_columns", tuple(haplodf.columns))
         reference_column = haplodf.attrs.get("reference_column")

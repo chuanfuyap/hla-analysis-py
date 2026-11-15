@@ -444,12 +444,6 @@ Fit messages can include `not converged`, `non-finite coefficients`,
 identify whether the null or full model failed. Failed checks leave statistical
 estimates missing; empty statistic columns can remain in tables containing failures.
 
-Model warnings are not automatically copied into `INFO`. A missing `INFO`
-value means the implemented checks passed; it does not establish that every
-model assumption is satisfied. Unexpected fitting exceptions can still stop
-analysis. Genotype blocks with no eligible columns may produce no scheduled
-interaction rows, rather than a row with a fitting message.
-
 ## Saving and plotting
 
 `N_used` reports the final number of complete-case samples for each test.

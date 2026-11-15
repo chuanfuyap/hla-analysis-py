@@ -31,6 +31,9 @@ setup(name="hapy",
       license='GNU GPLv3',
       packages=find_packages(),
       python_requires='==3.11.*',
+      entry_points={"console_scripts": [
+          "hapy-download-reference=hapy.data.hla_download:main",
+      ]},
       install_requires=[
         'pandas>=1.0.0,<2.0.0',
         'numpy>=1.20.0,<2.0.0',

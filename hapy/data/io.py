@@ -12,11 +12,12 @@ Functions:
     - read_bgl: Reads and processes phased Beagle genotype files.
     - read_gprobs: Reads Beagle probability files and transforms to dosage.
     - read_dosage: Reads dosage files and processes for HLAdat.
+    - read_aa_dosage: Reads mapped sample-by-residue TSVs and optional allele-phase sidecars.
     - breakitup: Utility to parse variant IDs into components.
     - getSampleIDs: Extracts sample IDs from a phased genotype file.
 """
 
-__all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage", "read_plink"]
+__all__ = ["read_famfile", "read_bgl", "read_gprobs", "read_dosage", "read_plink", "read_aa_dosage"]
 
 import abc
 from typing import Optional, List, Tuple, Any, Union
@@ -528,3 +529,7 @@ def read_dosage(dosagefileloc: str, phasedfileloc: str, filter_R2: Optional[str]
 
 # Import after the shared reader helpers, which plink.py reuses.
 from .plink import read_plink
+
+
+# Direct sample-by-marker allele-mapping exports (no implicit filtering).
+from .hla_mapping import read_aa_dosage

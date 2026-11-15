@@ -121,20 +121,37 @@ def _display_positions(frame, s):
     if s.x_axis not in {'genomic', 'amino_acid', 'equally_spaced'}:
         raise ValueError("x_axis must be 'genomic', 'amino_acid', or 'equally_spaced'.")
     frame = frame.copy()
+    if s.x_axis != "amino_acid" and not np.isfinite(frame.x.to_numpy(dtype=float)).all():
+        raise ValueError("Genomic coordinates are missing; use x_axis='amino_acid' for sequence positions or provide validated coordinates.")
     if s.x_axis == 'amino_acid':
         if frame.gene.nunique() != 1:
             raise ValueError("x_axis='amino_acid' requires a single HLA gene; select it with genes='DRB1', for example.")
         s._aa_gene = frame.gene.iloc[0]
-        frame['plot_x'] = frame.aa_pos
+        inserted = frame.aa_pos.map(lambda p: isinstance(p, str) and "i" in p)
+        if inserted.any():
+            ranks = {}
+            for value in frame.loc[inserted, "aa_pos"]:
+                base, rank = map(int, value.split("i"))
+                ranks[base] = max(ranks.get(base, 0), rank)
+            def sequence_x(value):
+                if not isinstance(value, str) or "i" not in value: return float(value)
+                base, rank = map(int, value.split("i"))
+                return base + (2 if base == -1 else 1) * rank / (ranks[base] + 1)
+            frame['plot_x'] = frame.aa_pos.map(sequence_x)
+            print("INFO: Inserted AA sites are displayed between flanking sequence positions; insertion labels, not fractional distances, identify them.", flush=True)
+        else:
+            frame['plot_x'] = frame.aa_pos
     elif s.x_axis == 'equally_spaced':
         # Identity includes the gene and genomic coordinate, so neither distinct
         # genes nor different coordinates are collapsed into one sequence position.
-        positions = frame[['gene', 'aa_pos', 'x']].drop_duplicates().sort_values(
-            ['x', 'gene', 'aa_pos'], kind='stable')
-        keys = list(positions.itertuples(index=False, name=None))
+        positions = frame[['gene', 'aa_pos', 'x']].drop_duplicates()
+        positions['_base'] = positions.aa_pos.map(lambda p: int(str(p).split('i')[0]))
+        positions['_insertion'] = positions.aa_pos.map(lambda p: int(str(p).split('i')[1]) if 'i' in str(p) else 0)
+        positions = positions.sort_values(['x', 'gene', '_base', '_insertion'], kind='stable')
+        keys = list(positions[['gene', 'aa_pos', 'x']].itertuples(index=False, name=None))
         order = {key: number for number, key in enumerate(keys)}
         frame['plot_x'] = [order[key] for key in frame[['gene', 'aa_pos', 'x']].itertuples(index=False, name=None)]
-        s._position_labels = [f'HLA-{gene}:{int(pos)}' for gene, pos, _ in keys]
+        s._position_labels = [f'HLA-{gene}:{pos}' for gene, pos, _ in keys]
         print('INFO: AA positions are equally spaced in genomic-coordinate order. '
               'X-axis spacing does not represent genomic distance or amino acid sequence distance.', flush=True)
     else:
@@ -185,7 +202,7 @@ def _decorate(fig, ax, artist, s, interaction=False, three=False, partner_chrom=
 
 
 def _point_key(row, interaction):
-    key = (row.gene, int(row.aa_pos))
+    key = (row.gene, row.aa_pos)
     return key + (int(row.y),) if interaction else key
 
 
@@ -284,8 +301,8 @@ def _annotate(ax, frame, selected, s, annotate_p, annotations, offsets, interact
     highlight_area = s.highlight_size if s.highlight_size is not None else max(80, marker_area * 2.5)
     created = 0
     for number, (_, row) in enumerate(frame.loc[selected].iterrows()):
-        label = (f'{row.gene} pos {int(row.aa_pos)}' if s.annotation_style == 'compact'
-                 else f'{row.gene} amino acid position {int(row.aa_pos)}')
+        label = (f'{row.gene} pos {row.aa_pos}' if s.annotation_style == 'compact'
+                 else f'{row.gene} amino acid position {row.aa_pos}')
         if interaction and s.annotation_partner:
             label += f'\n{row.partner_label}'
         if annotate_p:
@@ -380,9 +397,9 @@ def plot_aa_association(data, *, variant_col='VARIANT', pval_col=None, log10p_co
     Parameters
     ----------
     data : pandas.DataFrame
-        One position-level test per AA identifier. Input is not modified. Residue
-        or exon-suffixed identifiers and repeated tests at the same position are
-        rejected; their P-values are never silently combined.
+        One position-level test per AA identifier. Input is not modified.
+        Residue-suffixed IDs and repeated position tests are rejected; an exon
+        annotation is accepted. P-values are never silently combined.
     variant_col : str, default 'VARIANT'
         Column with IDs such as 'AA_DRB1_11_32552129': gene DRB1, amino acid
         sequence position 11, genomic coordinate 32552129 (used on X).
