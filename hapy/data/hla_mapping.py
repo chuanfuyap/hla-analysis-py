@@ -8,15 +8,15 @@ import warnings
 
 import numpy as np
 import pandas as pd
-from .hla_reference import HLAReference, load_hla_reference, normalise_hla_allele, _normalise_gene, _single_field_names, _sha
+from .hla_reference import HLAReference, load_hla_reference, normalise_hla_allele, _normalise_gene, _sha
 from .HLAdat import HLAdata
 from ..stats.preprocess import sample_index
 
-_MARKER = re.compile(r"^(AA_([A-Z0-9]+)_(-?\d+(?:i[1-9]\d*)?)_(NA|\d+)_exon(NA|\d+))_([ACDEFGHIKLMNPQRSTVWYX.])$")
+_MARKER = re.compile(r"^(AA_([A-Z0-9]+)_(-?\d+(?:i[1-9]\d*)?)_(NA|\d+)_exon(NA|\d+))_([ACDEFGHIKLMNPQRSTVWYX.]+)$")
 
 
 def parse_aa_marker(marker):
-    """Parse a generated residue marker; NA coordinates remain missing, never zero."""
+    """Parse a residue or combined-state marker; NA coordinates remain missing."""
     match = _MARKER.fullmatch(str(marker))
     if not match or (match[4] != "NA" and int(match[4]) <= 0):
         raise ValueError(f"Invalid mapped AA marker {marker!r}.")
@@ -42,6 +42,7 @@ class HLAAlleleMapping:
     issues: list = field(default_factory=list)
     motif_cache: dict = field(default_factory=dict, repr=False)
     dosage_file_sha256: str | None = field(default=None, repr=False)
+    motif_sources: dict = field(default_factory=dict, repr=False)
 
     def motif_dosages(self, gene, positions):
         """Return phased motif counts for one locus and ordered AA positions.
@@ -58,7 +59,8 @@ class HLAAlleleMapping:
         pandas.DataFrame
             Sample-by-motif 0/1/2 counts; rows with incomplete selected allele
             sequences are missing. Attributes identify motif allele groups and
-            unresolved sample count. Assignments are cached on this mapping.
+            unresolved sample count. Ambiguous motifs preserve actual candidate
+            combinations, for example {L|A|R;V|G|R}. Assignments are cached.
 
         Raises
         ------
@@ -81,6 +83,20 @@ class HLAAlleleMapping:
         if key not in self.motif_cache:
             selected = self.matrices[gene][:, [lookup[p] for p in positions]]
             motifs = [None if "?" in row else "|".join(row) for row in selected]
+            if gene in self.motif_sources:
+                indices = [lookup[p] for p in positions]
+                motifs = []
+                for source in self.motif_sources[gene]:
+                    if source is None:
+                        motifs.append(None)
+                        continue
+                    rows = np.asarray(source)[:, indices]
+                    candidates = sorted({"|".join(row) for row in rows})
+                    motifs.append(None if (rows == "?").any() else
+                                  candidates[0] if len(candidates) == 1 else
+                                  "{" + ";".join(candidates) + "}")
+            elif any(len(state) > 1 for state in selected.flat):
+                raise ValueError("Ambiguous mapping lacks candidate motif sequences; remap allele calls.")
             labels = sorted({m for m in motifs if m is not None})
             codes = {label: i for i, label in enumerate(labels)}
             assignment = np.array([codes.get(m, -1) for m in motifs], dtype=np.int32)
@@ -115,12 +131,14 @@ class HLAAlleleMapping:
         Stores original calls, called-allele matrices, integer allele pairs, issues,
         positions and metadata without pickle. Motif caches are not saved. The
         optional dosage fingerprint is retained for TSV/sidecar consistency checks.
+        Candidate sequences retain ambiguous joint motifs across save/load.
         """
         payload = {"metadata": np.array(json.dumps({"metadata": self.metadata, "issues": self.issues,
             "calls": json.loads(self.calls.to_json(orient="split")),
             "multi_columns": isinstance(self.calls.columns, pd.MultiIndex),
             "column_names": list(self.calls.columns.names), "genes": list(self.alleles),
-            "dosage_file_sha256": self.dosage_file_sha256}))}
+            "dosage_file_sha256": self.dosage_file_sha256,
+            "motif_sources": self.motif_sources}))}
         for gene in self.alleles:
             payload[f"{gene}_alleles"] = np.asarray(self.alleles[gene])
             payload[f"{gene}_matrix"] = self.matrices[gene]
@@ -173,7 +191,8 @@ class HLAAlleleMapping:
                 raise ValueError("Invalid allele IDs in phase sidecar.")
             matrices[gene].flags.writeable = False; ids[gene].flags.writeable = False
         return cls(calls, alleles, matrices, ids, positions, header["metadata"], header["issues"],
-                   dosage_file_sha256=header.get("dosage_file_sha256"))
+                   dosage_file_sha256=header.get("dosage_file_sha256"),
+                   motif_sources=header.get("motif_sources", {}))
 
 
 def _allele_columns(calls, reference, allele_columns):
@@ -224,8 +243,9 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     fallback_to_two_field : bool, default False
         If a three/four-field call has no compatible reference record, try
         two-field consensus while retaining its expression suffix. All matching
-        records must agree at each position; conflicting or unknown positions
-        stay missing. Never replaces an existing but incomplete sequence.
+        records contribute known residues at each position; disagreements form
+        combined states such as LVY and entirely unknown positions stay missing.
+        Never replaces an existing but incomplete sequence.
 
     Returns
     -------
@@ -254,6 +274,10 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
 
     Notes
     -----
+    One-field calls are accepted. Conflicting known residues form sorted
+    combined categories such as LVY, counted separately from specific residues.
+    Motifs preserve the actual reference combinations rather than independent
+    combinations of position-wise ambiguous states.
     Does not modify calls or apply frequency/variation filtering. Monomorphic
     positions are retained. A known allele is not doubled when its partner is
     missing. Lower-resolution consensus never arbitrarily chooses a representative
@@ -278,12 +302,14 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     unresolved = 0
     fallbacks = []
     for gene, pair in columns.items():
-        allow_single = _single_field_names(reference.alleles[gene])
+        allow_single = True
         normal = [[normalise_hla_allele(v, gene, allow_single_field=allow_single) for v in original[col]] for col in pair]
         unique = sorted({name for slot in normal for name in slot if name is not None})
         labels, sequences = [""], [np.full(len(reference.positions[gene]), "?", dtype="U1")]
         codes = {None: 0}
+        sources = [None]
         for name in unique:
+            target = name
             row = reference.resolve(name)
             if row is None and fallback_to_two_field:
                 match = re.fullmatch(r"(.+\*)(\d+(?::\d+)*)([NLSCAQ]?)", name)
@@ -301,6 +327,16 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
                 mapping.issues.append({"gene": gene, "allele": name, "reason": "allele not found in reference"})
             else:
                 codes[name] = len(labels); labels.append(name); sequences.append(row)
+                match = re.fullmatch(r"(.+\*)(\d+(?::\d+)*)([NLSCAQ]?)", target)
+                prefix, fields, suffix = match.groups()
+                base = prefix + fields
+                candidates = [i for i, allele in enumerate(reference.alleles[gene])
+                              if (allele == base or allele.startswith(base + ":") or allele == base + suffix)
+                              and (not suffix or allele.endswith(suffix))]
+                if not suffix and len(fields.split(":")) == 2:
+                    candidates = [i for i in candidates if not reference.alleles[gene][i].endswith("N")]
+                sources.append(reference.matrices[gene][candidates].tolist())
+        mapping.motif_sources[gene] = sources
         matrix = np.stack(sequences)
         ids = np.column_stack([[codes[name] for name in slot] for slot in normal]).astype(np.int32)
         position_info = reference.positions[gene].copy(deep=True)
@@ -321,16 +357,18 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
         matrix.flags.writeable = False; ids.flags.writeable = False
         mapping.alleles[gene], mapping.matrices[gene], mapping.allele_ids[gene], mapping.positions[gene] = labels, matrix, ids, position_info
     absent = sum(issue["reason"] == "allele not found in reference" for issue in mapping.issues)
-    if absent:# or unresolved:
-        message = (f"HLA mapping: {absent} distinct allele calls absent from the reference; ")
-                   #f"{unresolved} sample-position pairs unresolved. Affected dosages remain missing.")
-        if strict: raise ValueError(message)
+    if absent or unresolved:
+        message = (f"HLA mapping: {absent} distinct allele calls absent from the reference ")
+                #   f"{unresolved} sample-position pairs unresolved. Affected dosages remain missing.")
+        if strict:
+            raise ValueError(message)
         warnings.warn(message, UserWarning, stacklevel=2)
     if fallbacks:
         warnings.warn(
             f"HLA mapping: {len(fallbacks)} distinct unavailable high-resolution calls mapped using "
             "two-field consensus, preserving expression suffixes. This is inferred sequence; "
-            "conflicting or unknown positions remain missing. See hla_mapping.issues for details.",
+            "conflicting residues form combined states; unknown positions remain missing. "
+            "See hla_mapping.issues for details.",
             UserWarning, stacklevel=2,
         )
     result = pd.concat(frames, axis=1) if frames else pd.DataFrame(index=original.index)
@@ -344,7 +382,7 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
 
 
 def read_aa_dosage(fileloc, *, phase_path=None):
-    """Read mapped hard diploid residue dosages into an HLAdata object without QC.
+    """Read mapped amino-acid dosages into an HLAdata object without QC.
 
     Parameters
     ----------
@@ -352,7 +390,8 @@ def read_aa_dosage(fileloc, *, phase_path=None):
         Sample-by-residue dosage DataFrame or tab-separated file with IID in
         the first column. Marker columns must follow the mapping format
         AA_GENE_POSITION_COORD_exonEXON_RESIDUE. Coordinates/exons may be NA;
-        position labels may include insertions. Values must be 0, 1, 2 or missing.
+        position labels may include insertions. Values are nonnegative fractional
+        dosages or missing; imputed values above two are preserved.
     phase_path : str or pathlib.Path, optional
         Mapping sidecar for file input. Defaults to ``<fileloc>.phase.npz`` if
         that file exists. An explicitly requested missing sidecar raises.
@@ -378,7 +417,9 @@ def read_aa_dosage(fileloc, *, phase_path=None):
     -----
     Preserves string IIDs and does not mutate a supplied DataFrame. TSV input
     alone cannot recover allele phase or infer an assembly from coordinates.
-    This reader accepts mapped 0/1/2 counts, not arbitrary fractional imputations.
+    This reader preserves nonnegative fractional amino-acid dosages, including
+    imputed values above two and combined residue labels such as LVY. Values
+    are not clipped, rounded or renormalised. A phase sidecar is optional.
     """
     if isinstance(fileloc, pd.DataFrame):
         mapping = fileloc.attrs.get("hla_mapping")
@@ -398,8 +439,8 @@ def read_aa_dosage(fileloc, *, phase_path=None):
     values = data.apply(pd.to_numeric, errors="raise")
     values.attrs = {}
     observed = values.to_numpy(dtype=float)
-    if np.isinf(observed).any() or not np.isin(observed[~np.isnan(observed)], [0, 1, 2]).all():
-        raise ValueError("Mapped AA dosages must be 0, 1, 2 or missing.")
+    if np.isinf(observed).any() or (observed < 0).any():
+        raise ValueError("Mapped AA dosages must be finite and nonnegative, or missing.")
     if mapping is not None and not mapping.calls.index.equals(data.index):
         raise ValueError("Phase sidecar sample IDs/order do not match the dosage file.")
     # Reuse the existing marker annotation and HLAdata constructor, overriding

@@ -365,7 +365,7 @@ class HLAReference:
         return self.metadata["reference_version"]
 
     def resolve(self, allele):
-        """Resolve an allele to its sequence or conservative position-wise consensus.
+        """Resolve an allele to known residues or combined ambiguous residue states.
 
         Parameters
         ----------
@@ -379,8 +379,9 @@ class HLAReference:
         -------
         numpy.ndarray or None
             Read-only one-dimensional character array in reference position order.
-            A position is known only when every matching record agrees, including
-            its missing-state pattern. Disagreement produces ``?``. Returns None
+            Each position contains its known residue or a sorted set of distinct
+            known residues, such as LVY. Entirely unknown positions contain '?'.
+            Missing records do not override known residues. Returns None
             for missing calls, unknown loci, or no compatible records.
 
         Notes
@@ -390,9 +391,7 @@ class HLAReference:
         ``map_hla_alleles(fallback_to_two_field=True)``. An existing low-resolution
         record does not override conflicting higher-resolution descendants.
         """
-        raw_gene = str(allele).strip().upper().removeprefix("HLA-").removeprefix("HLA_").split("*", 1)[0]
-        allow_single = _single_field_names(self.alleles.get(raw_gene, []))
-        allele = normalise_hla_allele(allele, allow_single_field=allow_single)
+        allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None: return None
         if allele in self._resolved: return self._resolved[allele]
         gene = allele.split("*")[0]
@@ -410,23 +409,40 @@ class HLAReference:
             if not ids:
                 return None
         sequences = self.matrices[gene][ids]
-        known = sequences != "?"
 
-        first = known.argmax(axis=0)
-        consensus = sequences[first, np.arange(sequences.shape[1])]
-
-        consistent = (
-            (~known) | (sequences == consensus)
-        ).all(axis=0)
-
-        result = np.where(
-            known.any(axis=0) & consistent,
-            consensus,
-            "?"
-        )
+        # Variable-width strings preserve ambiguous states such as LVY.
+        result = np.asarray([
+            "".join(sorted(set(column[column != "?"]))) if (column != "?").any() else "?"
+            for column in sequences.T
+        ])
         result.flags.writeable = False
         self._resolved[allele] = result
         return result
+
+    def resolve_motif(self, allele, indices):
+        """Return actual candidate motifs at ordered alignment indices.
+
+        Missing residues make the motif unknown. Distinct compatible motifs
+        are joined inside braces; cross-position combinations are never invented.
+        """
+        allele = normalise_hla_allele(allele, allow_single_field=True)
+        if allele is None:
+            return None
+        match = _ALLELE.fullmatch(allele)
+        gene, fields, suffix = match.groups()
+        prefix = gene + "*" + fields
+        ids = [i for i, name in enumerate(self.alleles.get(gene, []))
+               if (name == prefix or name.startswith(prefix + ":") or name == prefix + suffix)
+               and (not suffix or name.endswith(suffix))]
+        if not suffix and len(fields.split(":")) == 2:
+            ids = [i for i in ids if not self.alleles[gene][i].endswith("N")]
+        if not ids:
+            return None
+        selected = self.matrices[gene][ids][:, list(indices)]
+        if (selected == "?").any():
+            return None
+        motifs = sorted({"|".join(row) for row in selected})
+        return motifs[0] if len(motifs) == 1 else "{" + ";".join(motifs) + "}"
 
     def save(self, path):
         """Save this reference as compressed NumPy arrays and JSON.

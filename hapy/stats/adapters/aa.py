@@ -148,6 +148,11 @@ class AAAdapter:
 
         aadf["AA_ID"] = aainfo["AA_ID"].to_numpy()
 
+        if ("FEATURE_TYPE" in aainfo and aainfo["FEATURE_TYPE"].eq("motif").all()
+                and len(aainfo)):
+            from ._motif import build_motif_geno
+            return build_motif_geno(aadf, aainfo, variant_id, retain_reference)
+
         if hladat.type == "softcall":
             haplodf, AAcount, refAA, aalist, _ = obt_haplo_soft(aadf, aainfo, retain_reference=retain_reference)
         else:
