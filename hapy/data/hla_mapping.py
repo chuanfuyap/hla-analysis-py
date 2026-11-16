@@ -322,8 +322,8 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
         mapping.alleles[gene], mapping.matrices[gene], mapping.allele_ids[gene], mapping.positions[gene] = labels, matrix, ids, position_info
     absent = sum(issue["reason"] == "allele not found in reference" for issue in mapping.issues)
     if absent or unresolved:
-        message = (f"HLA mapping: {absent} distinct allele calls absent from the reference; "
-                   f"{unresolved} sample-position pairs unresolved. Affected dosages remain missing.")
+        message = (f"HLA mapping: {absent} distinct allele calls absent from the reference; ")
+                   #f"{unresolved} sample-position pairs unresolved. Affected dosages remain missing.")
         if strict: raise ValueError(message)
         warnings.warn(message, UserWarning, stacklevel=2)
     if fallbacks:
