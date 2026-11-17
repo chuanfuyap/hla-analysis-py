@@ -49,7 +49,8 @@ class MappingReport:
         if not self.verbose:
             return
         if motifs:
-            count = int(len(frame.columns) > 0)
+            count = len({str(c).rsplit("_", 1)[0] if str(c).startswith("MOTIF_") else ""
+                         for c in frame.columns})
         else:
             from .hla_mapping import parse_aa_marker
             count = len({parse_aa_marker(marker)["AA_ID"] for marker in frame.columns})

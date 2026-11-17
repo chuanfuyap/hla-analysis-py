@@ -187,7 +187,8 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
         if bad.any() and invalid_totals == "missing":
             result.loc[bad, :] = np.nan
         result.attrs.update({"gene": gene, "resolution": "lowest_available_min_two_fields",
-                             "sum_tolerance": tolerance, "N_invalid_totals": int(bad.sum())})
+                             "sum_tolerance": tolerance, "N_invalid_totals": int(bad.sum()),
+                             "incomplete_input": dict(zip(df.index, (~np.isfinite(X).all(axis=1)).tolist()))})
         outputs[gene] = result
 
     return outputs

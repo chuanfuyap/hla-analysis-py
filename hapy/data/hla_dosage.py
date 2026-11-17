@@ -117,7 +117,7 @@ def _as_hladata(frame, reference=None, *, motifs=False, mapping=None):
         result.AA.info.index = clean_markers
     else:
         gene, positions = metadata["gene"], metadata["positions"]
-        group = f"MOTIF_{gene}_{'-'.join(positions)}"
+        group = metadata.get("motif_group", f"MOTIF_{gene}_{'-'.join(positions)}")
         labels = list(frame.columns)
         markers = [f"{group}_{label}" for label in labels]
         annotated = frame.T.copy()
@@ -174,7 +174,7 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
     sum_tolerance : float, default 0.02
         Tolerance for reporting gene totals that differ from two.
     unknown_tolerance : float, default 1e-8
-        Maximum unmapped dosage before an AA position is set to missing.
+        Tolerance for reporting unresolved dosage.
     output : {'hladata', 'dataframe'}, default 'hladata'
         Output format.
     simpleQC : bool, default True
@@ -210,16 +210,18 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
     if not isinstance(reference, HLAReference):
         reference = load_hla_reference(reference)
     panels = _resolved_panels(dosages, gene, allele_axis, sum_tolerance)
-    frames = []
+    frames, resolution = [], {}
     for locus, panel in panels.items():
         frame = _gene_dosage_to_aa(panel, reference, locus, allele_axis="columns",
                                   sum_tolerance=sum_tolerance,
                                   unknown_tolerance=unknown_tolerance)
+        resolution[locus] = dict(frame.attrs)
         frame.attrs = {}
         frames.append(frame)
     result = pd.concat(frames, axis=1)
     result.attrs.update({"genes": tuple(panels), "reference_version": reference.version,
                          "dosage_type": "expected_aa_dosage",
+                         "resolution": resolution,
                          "N_invalid_totals": {locus: panel.attrs["N_invalid_totals"]
                                               for locus, panel in panels.items()}})
     if len(panels) == 1:
@@ -236,21 +238,35 @@ def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
     X, complete, samples, names, matrix, reference, gene = _prepare_allele_dosages(
         dosages, reference, gene, allele_axis, sum_tolerance
     )
-    frames = []
+    frames, unmapped, partial_counts, missing_counts = [], {}, {}, {}
+    observed = dosages.T if allele_axis == "index" else dosages
+    complete &= ~np.array([observed.attrs.get("incomplete_input", {}).get(sample, False)
+                           for sample in observed.index], dtype=bool)
+    all_missing = observed.isna().all(axis=1).to_numpy()
     for j, base in enumerate(reference.positions[gene]["MARKER_BASE"]):
         states = sorted(set(matrix[:, j]) - {"?"})
-        if not states:
-            continue
         # Indicator[a, residue] = 1 if the allele carries that residue.
         indicators = (matrix[:, j, None] == np.asarray(states)[None, :]).astype(np.float64)
         values = X @ indicators
         unknown_mass = X @ (matrix[:, j] == "?").astype(np.float64)
-        values[(~complete) | (unknown_mass > unknown_tolerance), :] = np.nan
+        known_mass = X @ (matrix[:, j] != "?").astype(np.float64)
+        unresolved = (~complete) | (unknown_mass > unknown_tolerance)
+        missing = all_missing | (unresolved & (known_mass == 0))
+        values[missing, :] = np.nan
+        position = str(reference.positions[gene].iloc[j]["AA_POS"])
+        unmapped[position] = dict(zip(samples, np.where(complete, unknown_mass, np.nan).tolist()))
+        partial_counts[position] = int((unresolved & ~missing).sum())
+        missing_counts[position] = int(missing.sum())
+        if not states:
+            continue
         frames.append(pd.DataFrame(values, index=samples,
                                    columns=[f"{base}_{state}" for state in states]))
     result = pd.concat(frames, axis=1) if frames else pd.DataFrame(index=samples)
     result.attrs.update({"gene": gene, "reference_version": reference.version,
-                         "dosage_type": "expected_aa_dosage"})
+                         "dosage_type": "expected_aa_dosage",
+                         "unmapped_dosage": unmapped,
+                         "incomplete_input": dict(zip(samples, (~complete).tolist())),
+                         "N_partial": partial_counts, "N_missing": missing_counts})
     return result
 
 

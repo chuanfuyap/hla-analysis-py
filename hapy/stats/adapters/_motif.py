@@ -24,7 +24,8 @@ def build_motif_geno(aadf, info, variant_id, retain_reference=False):
 
     Notes
     -----
-    Applies frequency QC and uses the most frequent retained motif as reference.
+    Applies frequency QC. Insertion groups use absence as reference; other
+    groups use the most frequent retained motif.
     """
     frame = aadf.drop(columns=["AA_ID"]).T.astype(float).sort_index()
     labels = dict(zip(frame.columns, info["MOTIF"].astype(str)))
@@ -44,6 +45,12 @@ def build_motif_geno(aadf, info, variant_id, retain_reference=False):
     else:
         columns = tests + ([reference] if retain_reference else [])
         reference_column = reference if retain_reference else None
+    # Insertion states use implicit absence as reference, not another insertion.
+    if str(variant_id).endswith("ins"):
+        count = len(passing) + 1 if len(passing) else 0
+        reference_label = "absence" if len(passing) else None
+        tests = [column for column in frame if frame[column].nunique(dropna=True) > 1]
+        columns, reference_column = tests, None
     geno = frame.loc[:, columns].copy()
     geno.columns = [f"G_{column}" for column in geno]
     geno.attrs["test_columns"] = tuple(f"G_{column}" for column in tests)

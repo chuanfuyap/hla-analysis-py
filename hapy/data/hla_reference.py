@@ -341,7 +341,8 @@ def _coordinates(gene, names, matrix, positions, nucleotide_file, annotation_dir
 
 
 def _reference_identity(alleles, matrices, positions, metadata):
-    info = {k: v for k, v in metadata.items() if k not in {"reference_version", "inferred_positions"}}
+    # Resolution annotations are derived lazily from the fingerprinted matrices.
+    info = {k: v for k, v in metadata.items() if k not in {"reference_version", "inferred_positions", "ambiguous_positions"}}
     info["source_sha256"] = sorted(info["source_sha256"].values())
     digest = hashlib.sha256(json.dumps(info, sort_keys=True).encode())
     for gene in metadata["genes"]:
@@ -385,8 +386,9 @@ class HLAReference:
 
         Notes
         -----
-        Known residues must agree across matching alleles. Missing or conflicting
-        states resolve to '?'. Inferred positions are stored in metadata.
+        Residue/gap alternatives form combined states such as .P. Conflicting
+        residues and unavailable states resolve to '?'. Resolution flags are
+        stored in metadata.
         """
         allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None: return None
@@ -411,12 +413,23 @@ class HLAReference:
         has_known = known.any(axis=0)
         first = sequences[known.argmax(axis=0), np.arange(sequences.shape[1])]
         agrees = ((sequences == first) | ~known).all(axis=0)
-        assigned = has_known & agrees
-        result = np.where(assigned, first, "?")
-        inferred = assigned & (~known).any(axis=0)
+        result = np.where(has_known & agrees, first, "?").astype("U2")
+        ambiguous = {}
+        for j in np.flatnonzero(has_known & ~agrees):
+            states = sorted(set(sequences[known[:, j], j]))
+            residues = [state for state in states if state != "."]
+            if "." in states and len(residues) == 1:
+                result[j] = "".join(states)
+            ambiguous[str(self.positions[gene].iloc[j]["AA_POS"])] = {
+                "states": "".join(states),
+                "kind": "gap" if "." in states and len(residues) == 1 else "residue",
+                "has_missing": bool((~known[:, j]).any()),
+            }
+        inferred = (result != "?") & (~known).any(axis=0)
         self.metadata.setdefault("inferred_positions", {})[allele] = (
             self.positions[gene].loc[inferred, "AA_POS"].astype(str).tolist()
         )
+        self.metadata.setdefault("ambiguous_positions", {})[allele] = ambiguous
         result.flags.writeable = False
         self._resolved[allele] = result
         return result
