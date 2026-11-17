@@ -1,5 +1,4 @@
-"""Resolve HLA allele dosages, prioritising the lowest available
-resolution (minimum two fields) without modifying retained dosages."""
+"""Resolve overlapping HLA dosages by dosage and allele resolution."""
 
 import re
 
@@ -16,7 +15,7 @@ _HLA_COLUMN = re.compile(r"^HLA_([A-Za-z0-9]+)_((?:\d{2}){1,5})([NLSCAQ]?)$")
 
 def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
                            invalid_totals: str = "keep") -> dict[str, pd.DataFrame]:
-    """Resolve HLA allele dosages at the highest available resolution.
+    """Resolve overlapping HLA alleles without changing retained dosages.
 
     Parameters
     ----------
@@ -43,8 +42,8 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
 
     Notes
     -----
-    Higher-resolution dosages take precedence. Positive parent remainders are
-    retained without double counting.
+    Larger dosages take precedence within an allele family. Values within
+    1e-6 prefer higher resolution. One-field markers are excluded.
     """
 
     # validate input files
@@ -121,43 +120,43 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
             digits, suffix = node
             return (digits[:-2], "") if len(digits) > 2 else None
 
-        
-        # Process lower-resolution alleles first.
+
         order = sorted(nodes, key=lambda node: (len(node[0]), node[0], node[1]))
-
-        covered = {}
-        retained = {}
-        totals = np.zeros(n, dtype=np.float64)
-
-        for node in order:
+        children = {node: [] for node in nodes}
+        for node in nodes:
             ancestor = parent(node)
+            if ancestor is not None:
+                children[ancestor].append(node)
 
-            # Samples already represented by a lower-resolution allele.
-            ancestor_covered = (
-                covered[ancestor]
-                if ancestor is not None
-                else np.zeros(n, dtype=bool)
-            )
-
+        # Compare a parent against the best available descendant per sample.
+        # Sibling branches are independent; their dosages are not summed here.
+        best, preferred = {}, {}
+        for node in reversed(order):
+            descendant = np.full(n, -np.inf)
+            for child in children[node]:
+                descendant = np.maximum(descendant, best[child])
             if node not in column_index:
-                covered[node] = ancestor_covered
+                best[node] = descendant
+                preferred[node] = np.zeros(n, dtype=bool)
                 continue
-
             observed = X[:, column_index[node]]
             known = np.isfinite(observed)
+            tied = np.isclose(observed, descendant, atol=1e-6, rtol=0)
+            use_parent = known & ((observed > descendant) & ~tied)
+            preferred[node] = use_parent
+            best[node] = np.where(use_parent, observed, descendant)
 
-            # Retain the original dosage only when no ancestor
-            # has an available dosage for this sample.
-            selected = known & ~ancestor_covered
-
+        covered, retained = {}, {}
+        totals = np.zeros(n, dtype=np.float64)
+        for node in order:
+            ancestor = parent(node)
+            ancestor_covered = covered[ancestor] if ancestor is not None else np.zeros(n, dtype=bool)
+            selected = preferred[node] & ~ancestor_covered
             covered[node] = ancestor_covered | selected
-
-            values = np.where(selected, observed, 0.0)
-
-            if np.any(selected):
+            if node in column_index and selected.any():
+                values = np.where(selected, X[:, column_index[node]], 0.0)
                 retained[node] = values
-
-            totals += values
+                totals += values
 
         bad = ~np.isfinite(totals) | (np.abs(totals - 2.0) > tolerance)
         if bad.any() and invalid_totals == "raise":
@@ -172,7 +171,7 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
             raise ValueError(message + "The input may lack alleles or contain inconsistent resolutions.")
 
 
-        # Most-specific names first; still preserve nonzero parent remainders.
+        # Return more-specific allele names first.
         # Preserve observed marker states when every sample has zero/missing mass,
         # so downstream conversion can return missing rows rather than no columns.
         names = sorted(retained or column_index,
@@ -186,7 +185,8 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
         result.loc[~np.isfinite(X).any(axis=1), :] = np.nan
         if bad.any() and invalid_totals == "missing":
             result.loc[bad, :] = np.nan
-        result.attrs.update({"gene": gene, "resolution": "lowest_available_min_two_fields",
+        result.attrs.update({"gene": gene, "resolution": "largest_dosage_higher_resolution_on_ties",
+                             "dosage_tolerance": 1e-6,
                              "sum_tolerance": tolerance, "N_invalid_totals": int(bad.sum()),
                              "incomplete_input": dict(zip(df.index, (~np.isfinite(X).all(axis=1)).tolist()))})
         outputs[gene] = result
