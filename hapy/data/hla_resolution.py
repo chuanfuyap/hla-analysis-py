@@ -1,13 +1,4 @@
-"""Resolve overlapping HLA dosage markers into non-overlapping allele dosages.
-
-Functions
----------
-resolve_hla_resolution : Retain the most specific available dosage per sample.
-collapse_hla_resolution : Backward-compatible alias for the resolver.
-
-Input has samples on rows and HLA allele markers on columns. Output contains
-one sample-by-allele DataFrame per gene, with normalised allele names.
-"""
+"""Resolve overlapping HLA dosage markers into non-overlapping allele dosages."""
 
 import re
 
@@ -24,64 +15,38 @@ _HLA_COLUMN = re.compile(r"^HLA_([A-Za-z0-9]+)_((?:\d{2}){1,5})([NLSCAQ]?)$")
 
 def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
                            invalid_totals: str = "keep") -> dict[str, pd.DataFrame]:
-    """Resolve overlapping parent and descendant HLA allele dosages.
+    """Resolve HLA allele dosages at the highest available resolution.
 
     Parameters
     ----------
     df : pandas.DataFrame
-        Samples on rows and HLA allele dosages on columns. Accepts hapy labels
-        such as HLA_A_01/HLA_A_0101 and names such as A*01:01. Values must be
-        nonnegative and finite, or missing. Values above two are accepted;
-        fractional contributions are not clipped or rounded. Non-HLA predictors
-        are ignored.
+        Samples on rows and HLA allele dosage markers on columns.
     tolerance : float, default 0.02
-        Allowed deviation from 2 when evaluating resolved gene totals.
-        Parent/descendant disagreement is not checked.
+        Tolerance for comparing resolved gene totals with two.
     invalid_totals : {'keep', 'raise', 'missing'}, default 'keep'
-        Keep available resolved dosages even when totals differ from 2. This
-        supports QC-filtered panels without rescaling or restoring removed
-        alleles. Use 'raise' to require diploid totals, or 'missing' to set
-        affected sample-gene panels to NaN. The AA converters use 'keep'.
+        Keep dosages, raise an error, or set the sample-gene panel to missing
+        when its total falls outside the tolerance.
 
     Returns
     -------
     dict[str, pandas.DataFrame]
-        One sample-by-allele float64 dosage matrix per gene. Allele names are
-        normalised, for example A*01:01. Columns with no retained dosage are
-        omitted unless needed to retain an entirely missing panel. Attributes
-        record the gene, resolution policy, tolerance and invalid-total count.
+        One sample-by-allele dosage DataFrame per gene, with normalised names.
 
     Raises
     ------
     TypeError
         If df is not a DataFrame.
     ValueError
-        For invalid labels, duplicate identifiers, invalid dosages, or invalid
-        totals when invalid_totals='raise'.
+        For invalid labels, duplicate IDs, negative/infinite dosages or options.
+        Totals outside tolerance also raise when invalid_totals='raise'.
 
     Notes
     -----
-    Descendant dosages are assigned first. Only remaining dosage is retained at
-    a parent, preventing double counting. Higher-resolution dosages take
-    precedence even when their sum exceeds the parent; that parent contributes
-    zero additional dosage. No parent/descendant consistency check is applied.
-    Every positive parent remainder is
-    retained: dropping small remainders separately can lose substantial total
-    dosage. Missing markers supply no additional dosage; known ancestors may
-    supply the remainder. After QC removes alleles, the available dosages need
-    not sum to 2; the default resolver preserves these partial panels.
-    One-field remainders are retained, not assigned an arbitrary specific allele.
-    Expression suffixes remain distinct terminal labels. Values are neither
-    rounded to hard calls nor renormalised; chromosome phase is not inferred.
-
-    Examples
-    --------
-    >>> df = pd.DataFrame({"HLA_A_0101": [2.0],
-    ...                    "HLA_A_01010101": [0.7]}, index=["sample1"])
-    >>> resolved = resolve_hla_resolution(df)
-    >>> round(float(resolved["A"].loc["sample1", "A*01:01"]), 1)
-    1.3
+    Higher-resolution dosages take precedence. Positive parent remainders are
+    retained without double counting.
     """
+
+    # validate input files
     if invalid_totals not in {"keep", "raise", "missing"}:
         raise ValueError("invalid_totals must be 'keep', 'raise' or 'missing'")
     if not isinstance(df, pd.DataFrame):
@@ -91,7 +56,7 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
     if not np.isfinite(tolerance) or tolerance < 0:
         raise ValueError("tolerance must be a nonnegative finite number")
 
-    # (digits, expression_suffix, input column), grouped by HLA gene.
+    # reads in dataframe containing HLA data and normalise the name for subsquent processing
     groups = {}
     for column in df.columns:
         match = _HLA_COLUMN.fullmatch(str(column))
@@ -109,6 +74,7 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
             digits = fields.replace(":", "")
         else:
             gene, digits, suffix = match.groups()
+        # (digits, expression_suffix, input column), grouped by HLA gene.
         groups.setdefault(gene.upper(), []).append((digits, suffix, column))
 
     if not groups:
@@ -121,6 +87,7 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
         raise ValueError("The input has no samples")
     outputs = {}
 
+    # generates per gene dataframe for the alleles.
     for gene, records in groups.items():
         columns = [col for _, _, col in records]
         X = df.loc[:, columns].apply(pd.to_numeric, errors="raise").to_numpy(

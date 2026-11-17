@@ -65,30 +65,26 @@ def available_hla_genes(alignment_dir):
 
 
 def normalise_hla_allele(value, gene=None, *, allow_single_field=False):
-    """Normalise an individual allele name without reducing its resolution.
+    """Normalise an HLA allele name.
 
     Parameters
     ----------
     value : str or scalar missing value
-        Colon-delimited allele, optionally prefixed by HLA-. Unambiguous old
-        four-digit names are accepted; missing tokens return None.
-    gene : str, optional
-        Expected locus. Allows a gene-free call such as ``01:01`` and rejects
-        a conflicting locus prefix.
+        HLA allele name. Missing values return None.
+    gene : str or None, default None
+        Expected gene. Allows gene-free allele names when supplied.
     allow_single_field : bool, default False
-        Allow single-field names only for reference-defined nomenclature such
-        as MICB*001. Classical group-only calls normally remain invalid.
+        Accept single-field names such as A*01.
 
     Returns
     -------
     str or None
-        Normalised name retaining numeric fields and expression suffix.
+        Normalised name retaining its resolution and expression suffix.
 
     Raises
     ------
     ValueError
-        For malformed names, mismatched loci, ambiguous compact names, or
-        unsupported group/serotype/ambiguity-list notation.
+        For invalid names, conflicting genes or unsupported allele notation.
     """
     if value is None or pd.isna(value) or str(value).strip().upper() in {"", ".", "NA", "NAN", "NONE", "0", "0000"}:
         return None
@@ -123,7 +119,7 @@ def _sha(path):
 
 
 def _alignment(path, gene, protein=True):
-    """Resolve reference-relative blocks, padding absent/terminated sequence as unknown."""
+    """Read an IPD alignment and resolve reference-relative sequence symbols."""
     blocks, current, header, releases = [], [], "", set()
     prefix = "Prot" if protein else "cDNA"
     for line in Path(path).read_text().splitlines():
@@ -176,14 +172,18 @@ def _alignment(path, gene, protein=True):
                 raise ValueError(f"{path}: inconsistent block width for {name}.")
             decoded = "".join(("?" if extension else ref[i]) if c == "-" else c for i, c in enumerate(seq))
             chunks[name].append(decoded.replace("*", "?") if not protein else
-                                "".join(c if c in "ACDEFGHIKLMNPQRSTVWYX." else "?" for c in decoded))
+                                "".join(c if c in "ACDEFGHIKLMNPQRSTVWYX.*" else "?" for c in decoded))
         ref_chunks.append(ref)
         offset += width
     matrix = np.array([list("".join(chunks[name])) for name in names], dtype="U1")
     if protein:
         for row in matrix:
             stops = np.flatnonzero(row == "X")
-            if len(stops): row[stops[0]+1:] = "?"
+            if len(stops):
+                tail = row[stops[0]+1:]
+                # Preserve alignment '*' states; other residues after a stop
+                # cannot be interpreted as translated amino acids.
+                tail[tail != "*"] = "?"
         if mature is None:
             raise ValueError(f"{path}: a position-1 ruler anchor is required; negative ticks alone are insufficient.")
         ref = "".join(ref_chunks)
@@ -365,31 +365,28 @@ class HLAReference:
         return self.metadata["reference_version"]
 
     def resolve(self, allele):
-        """Resolve an allele to known residues or combined ambiguous residue states.
+        """Resolve an HLA allele to its amino-acid states.
 
         Parameters
         ----------
         allele : str or scalar missing value
-            Gene-qualified allele name, optionally prefixed by HLA-. A lower-
-            resolution call matches all compatible reference records. An expression
-            suffix restricts matches to that suffix; an unsuffixed call does not
-            exclude suffixed descendants.
+            Gene-qualified HLA allele name.
 
         Returns
         -------
         numpy.ndarray or None
-            Read-only one-dimensional character array in reference position order.
-            Each position contains its known residue or a sorted set of distinct
-            known residues, such as LVY. Entirely unknown positions contain '?'.
-            Missing records do not override known residues. Returns None
-            for missing calls, unknown loci, or no compatible records.
+            Amino-acid states in reference position order, or None if no allele
+            matches.
+
+        Raises
+        ------
+        ValueError
+            If the allele name is invalid.
 
         Notes
         -----
-        Results are cached by normalised call. No unavailable high-resolution call
-        is automatically shortened here; opt-in fallback belongs to
-        ``map_hla_alleles(fallback_to_two_field=True)``. An existing low-resolution
-        record does not override conflicting higher-resolution descendants.
+        Low-resolution matches may produce combined states such as LVY.
+        '*' and '.' are mapped states; '?' denotes unavailable sequence.
         """
         allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None: return None
@@ -420,10 +417,32 @@ class HLAReference:
         return result
 
     def resolve_motif(self, allele, indices):
-        """Return actual candidate motifs at ordered alignment indices.
+        """Resolve an HLA allele to candidate motifs.
 
-        Missing residues make the motif unknown. Distinct compatible motifs
-        are joined inside braces; cross-position combinations are never invented.
+        Parameters
+        ----------
+        allele : str or scalar missing value
+            Gene-qualified HLA allele name.
+        indices : iterable of int
+            Alignment column indices in the required motif order.
+
+        Returns
+        -------
+        str or None
+            A compact motif or candidate set such as {LAR;VGR}. Returns None
+            when no matching record has states at all selected positions.
+
+        Raises
+        ------
+        ValueError
+            If the allele name is invalid.
+        IndexError
+            If an alignment index is out of range.
+
+        Notes
+        -----
+        Uses matching reference records with all selected states.
+        '*' and '.' are valid motif states.
         """
         allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None:
@@ -439,28 +458,29 @@ class HLAReference:
         if not ids:
             return None
         selected = self.matrices[gene][ids][:, list(indices)]
-        if (selected == "?").any():
-            return None
-        motifs = sorted({"|".join(row) for row in selected})
-        return motifs[0] if len(motifs) == 1 else "{" + ";".join(motifs) + "}"
+        from ._motifs import motif_from_sequences
+        return motif_from_sequences(selected)
 
     def save(self, path):
-        """Save this reference as compressed NumPy arrays and JSON.
+        """Save the HLA reference to an NPZ file.
 
         Parameters
         ----------
         path : str or pathlib.Path
-            Destination NPZ file. An existing file is overwritten; its parent
-            directory must exist.
+            Output NPZ file. Existing files are overwritten.
 
         Returns
         -------
         None
 
+        Raises
+        ------
+        OSError
+            If the output file cannot be written.
+
         Notes
         -----
-        Includes allele names, aligned matrices, positions, source hashes and the
-        reference fingerprint. Uses no pickle. Reload with ``load_hla_reference``.
+        Includes sequence matrices and reference metadata. Reload with load_hla_reference.
         """
         payload = {"metadata": np.array(json.dumps(self.metadata))}
         for gene in self.alleles:
@@ -471,29 +491,28 @@ class HLAReference:
 
 
 def load_hla_reference(path):
-    """Load a saved local reference and verify its content fingerprint.
+    """Load a saved HLA reference and verify its fingerprint.
 
     Parameters
     ----------
     path : str or pathlib.Path
-        NPZ file previously written by ``HLAReference.save`` or the builder.
+        File saved by HLAReference.save or build_hla_reference.
 
     Returns
     -------
     HLAReference
-        Reference with read-only sequence matrices and an initially empty
-        resolution cache. Source alignments need not remain available.
+        Allele sequences, position annotations and reference metadata.
 
     Raises
     ------
     ValueError
-        For unsupported schema, inconsistent dimensions or fingerprint mismatch.
+        For an unsupported schema, inconsistent dimensions or fingerprint mismatch.
     OSError
-        If the file cannot be opened.
+        If the file cannot be read.
 
     Notes
     -----
-    No network access, alignment parsing or pickle loading is performed.
+    Loading does not require the original alignment files.
     """
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
@@ -525,70 +544,48 @@ def load_hla_reference(path):
 def build_hla_reference(alignment_dir, *, genes=GENES, annotation_dir=None,
                         genomic_table=None, transcripts=None, imgt_release=None,
                         assembly="GRCh38", save_path=None, coordinate_checks=None):
-    """Build a reusable local allele-to-amino-acid reference without frequency QC.
+    """Build an HLA amino-acid reference from local IPD alignments.
 
     Parameters
     ----------
     alignment_dir : str or pathlib.Path
-        Official IPD alignment folder containing GENE_prot.txt. Coordinate
-        building also needs matching GENE_nuc.txt files. Shared DRB_prot.txt
-        and DRB_nuc.txt are fallbacks when the per-locus protein file is absent.
-    genes : str or iterable of str, optional
-        Loci to include. Defaults to A, B, C, DRB1, DQA1, DQB1, DPA1 and DPB1.
-        An explicit list selects exactly those loci; it does not extend the
-        defaults. A single locus string is accepted. ``"all"`` discovers
-        per-locus protein files using ``available_hla_genes``.
-    annotation_dir : str or pathlib.Path, optional
-        Folder with GENE.json (expanded Ensembl GRCh38 lookup) and
-        GENE.cds.json (selected transcript CDS). Supply together with
-        genomic_table; omit both for a protein-only reference.
-    genomic_table : str or pathlib.Path, optional
-        Local HTML snapshot of the official IPD genomic reference table.
-    transcripts : mapping of str to str, optional
-        Locus-to-Ensembl-transcript overrides, optionally versioned. Without
-        an override, coordinate building selects the canonical coding transcript.
-    imgt_release : str, optional
-        Required release header, for example ``"3.66.0"``. If omitted, infer
-        from the first alignment and require all inputs to match.
-    assembly : str, default "GRCh38"
-        Coordinate assembly. Only GRCh38 is currently supported, including
-        for the metadata of protein-only builds; missing positions stay missing.
-    save_path : str or pathlib.Path, optional
-        Save the resulting reference as a compressed NPZ file. Existing files
-        are overwritten; the parent directory must exist.
-    coordinate_checks : pandas.DataFrame or str or pathlib.Path, optional
-        Independent checks with GENE, AA_POS, POS and EXON columns, or a TSV
-        containing those columns. Coordinates must use the selected assembly.
+        Folder containing per-gene protein alignment files.
+    genes : str or iterable of str, default GENES
+        Genes to include. GENES contains A, B, C, DRB1, DQA1, DQB1, DPA1 and
+        DPB1. Use 'all' to discover available per-gene protein files.
+    annotation_dir : str or pathlib.Path or None, default None
+        Folder containing Ensembl lookup/CDS JSON files for genomic coordinates.
+        Provide together with genomic_table and matching nucleotide alignments.
+    genomic_table : str or pathlib.Path or None, default None
+        Local IPD genomic reference table in HTML format.
+    transcripts : mapping or None, default None
+        Gene-to-transcript overrides. None uses canonical coding transcripts.
+    imgt_release : str or None, default None
+        Required IPD release. None uses the first alignment's release.
+    assembly : str, default 'GRCh38'
+        Coordinate assembly. Only GRCh38 is supported.
+    save_path : str or pathlib.Path or None, default None
+        Optional output NPZ file.
+    coordinate_checks : pandas.DataFrame or str or pathlib.Path or None, default None
+        Coordinate checks with GENE, AA_POS, POS and EXON columns, or a TSV path.
 
     Returns
     -------
     HLAReference
-        Full allele names, allele-by-position sequence matrices, position
-        metadata and source/release fingerprints. All alignment columns are
-        retained, including monomorphic sites, leader and insertion positions.
+        Allele sequences, position annotations and source metadata.
 
     Raises
     ------
     ValueError
-        For invalid/duplicate loci, inconsistent releases, incomplete coordinate
-        inputs, unsupported assembly, invalid transcript/sequence matches or
-        failed coordinate checks.
+        For invalid genes, inconsistent releases, unsupported assembly or
+        invalid coordinate/transcript inputs.
     OSError
-        If a required local input cannot be read or the output cannot be written.
+        If a required input cannot be read or output cannot be written.
 
     Notes
     -----
-    No network access or allele-frequency filtering is performed. Alignment
-    identity symbols are resolved; unknown sequence stays unknown. Genomic
-    positions are 1-based middle nucleotides of validated codons. Protein-only
-    builds do not infer coordinates or exons. Full-resolution names are retained
-    because splicing, expression variants and sequence coverage can differ
-    within a two-field group. No dosages are renormalised after construction.
-
-    Examples
-    --------
-    >>> reference = build_hla_reference("inputs/alignments", genes="all")
-    >>> reference.save("hla_reference.npz")
+    Genomic positions use the middle nucleotide of each validated codon.
+    Protein-only builds leave genomic coordinates missing.
     """
     started = time.perf_counter()
     print("Building HLA reference data for allele mapping", flush=True)

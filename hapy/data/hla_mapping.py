@@ -10,19 +10,20 @@ import numpy as np
 import pandas as pd
 from .hla_reference import HLAReference, load_hla_reference, normalise_hla_allele, _normalise_gene, _sha
 from .HLAdat import HLAdata
+from ._motifs import motif_from_sequences, representative_motif
 from ..stats.preprocess import sample_index
 
-_MARKER = re.compile(r"^(AA_([A-Z0-9]+)_(-?\d+(?:i[1-9]\d*)?)_(NA|\d+)_exon(NA|\d+))_([ACDEFGHIKLMNPQRSTVWYX.]+)$")
+_MARKER = re.compile(r"^(AA_([A-Z0-9]+)_(-?\d+(?:i[1-9]\d*)?)_(NA|\d+)(?:_exon(NA|\d+))?)_([ACDEFGHIKLMNPQRSTVWYX.*]+)$")
 
 
 def parse_aa_marker(marker):
-    """Parse a residue or combined-state marker; NA coordinates remain missing."""
+    """Parse residue, gap '.' and alignment '*' markers; NA stays missing."""
     match = _MARKER.fullmatch(str(marker))
     if not match or (match[4] != "NA" and int(match[4]) <= 0):
         raise ValueError(f"Invalid mapped AA marker {marker!r}.")
     return {"AA_ID": match[1], "GENE": match[2], "AA_POS": match[3],
             "POS": None if match[4] == "NA" else int(match[4]),
-            "EXON": None if match[5] == "NA" else int(match[5]), "RESIDUE": match[6]}
+            "EXON": None if match[5] in {None, "NA"} else int(match[5]), "RESIDUE": match[6]}
 
 
 @dataclass(eq=False)
@@ -45,31 +46,29 @@ class HLAAlleleMapping:
     motif_sources: dict = field(default_factory=dict, repr=False)
 
     def motif_dosages(self, gene, positions):
-        """Return phased motif counts for one locus and ordered AA positions.
+        """Calculate within-gene motif counts from mapped allele pairs.
 
         Parameters
         ----------
         gene : str
-            Mapped locus, optionally HLA-prefixed.
+            HLA gene to map.
         positions : iterable of str or int
-            Nonempty unique position labels, in the order to join residues.
+            Amino-acid positions in the required motif order.
 
         Returns
         -------
         pandas.DataFrame
-            Sample-by-motif 0/1/2 counts; rows with incomplete selected allele
-            sequences are missing. Attributes identify motif allele groups and
-            unresolved sample count. Ambiguous motifs preserve actual candidate
-            combinations, for example {L|A|R;V|G|R}. Assignments are cached.
+            Sample-by-motif counts with unmapped contributions in attrs.
 
         Raises
         ------
         ValueError
-            For an unmapped gene, unknown positions, or empty/duplicate positions.
+            For an unmapped gene, unknown positions or empty/duplicate positions.
 
-        See Also
-        --------
-        aa_motif_dosages : Public wrapper accepting mapped data or this object.
+        Notes
+        -----
+        Mapped contributions are retained when the partner is unavailable.
+        Samples with no usable mapping remain missing.
         """
         gene = _normalise_gene(gene)
         if gene not in self.matrices: raise ValueError(f"Gene {gene!r} was not mapped.")
@@ -79,10 +78,10 @@ class HLAAlleleMapping:
         lookup = {str(pos): i for i, pos in enumerate(self.positions[gene]["AA_POS"])}
         missing = set(positions) - set(lookup)
         if missing: raise ValueError(f"Unknown {gene} positions: {sorted(missing)}")
-        key = (gene, self.metadata["reference_version"], positions)
+        key = (gene, self.metadata["reference_version"], positions, "compact-v2")
         if key not in self.motif_cache:
             selected = self.matrices[gene][:, [lookup[p] for p in positions]]
-            motifs = [None if "?" in row else "|".join(row) for row in selected]
+            motifs = [None if "?" in row else "".join(row) for row in selected]
             if gene in self.motif_sources:
                 indices = [lookup[p] for p in positions]
                 motifs = []
@@ -91,12 +90,10 @@ class HLAAlleleMapping:
                         motifs.append(None)
                         continue
                     rows = np.asarray(source)[:, indices]
-                    candidates = sorted({"|".join(row) for row in rows})
-                    motifs.append(None if (rows == "?").any() else
-                                  candidates[0] if len(candidates) == 1 else
-                                  "{" + ";".join(candidates) + "}")
+                    motifs.append(motif_from_sequences(rows))
             elif any(len(state) > 1 for state in selected.flat):
                 raise ValueError("Ambiguous mapping lacks candidate motif sequences; remap allele calls.")
+            motifs = [representative_motif(label) for label in motifs]
             labels = sorted({m for m in motifs if m is not None})
             codes = {label: i for i, label in enumerate(labels)}
             assignment = np.array([codes.get(m, -1) for m in motifs], dtype=np.int32)
@@ -107,31 +104,37 @@ class HLAAlleleMapping:
         ids = assignment[self.allele_ids[gene]]
         complete = (ids >= 0).all(axis=1)
         dosage = np.column_stack([(ids == code).sum(axis=1) for code in range(len(labels))]).astype(float) if labels else np.empty((len(ids), 0))
-        dosage[~complete, :] = np.nan
+        missing = ~(ids >= 0).any(axis=1)
+        dosage[missing, :] = np.nan
         frame = pd.DataFrame(dosage, index=self.calls.index.copy(), columns=labels)
         frame.attrs.update({"gene": gene, "positions": positions, "reference_version": self.metadata["reference_version"],
                             "allele_groups": {k: list(v) for k, v in groups.items()},
-                            "N_unresolved": int((~complete).sum())})
+                            "unmapped_dosage": dict(zip(self.calls.index, (ids < 0).sum(axis=1).astype(float).tolist())),
+                            "N_unresolved": int((~complete).sum()),
+                            "N_partial": int((~complete & ~missing).sum()),
+                            "N_missing": int(missing.sum())})
         return frame
 
     def save(self, path):
-        """Save calls and phase metadata to a compressed NPZ sidecar.
+        """Save allele calls and mapping data to an NPZ file.
 
         Parameters
         ----------
         path : str or pathlib.Path
-            Output filename. Existing files are overwritten; parent must exist.
+            Output NPZ file. Existing files are overwritten.
 
         Returns
         -------
         None
 
+        Raises
+        ------
+        OSError
+            If the output file cannot be written.
+
         Notes
         -----
-        Stores original calls, called-allele matrices, integer allele pairs, issues,
-        positions and metadata without pickle. Motif caches are not saved. The
-        optional dosage fingerprint is retained for TSV/sidecar consistency checks.
-        Candidate sequences retain ambiguous joint motifs across save/load.
+        Motif caches are omitted. Reload with HLAAlleleMapping.load.
         """
         payload = {"metadata": np.array(json.dumps({"metadata": self.metadata, "issues": self.issues,
             "calls": json.loads(self.calls.to_json(orient="split")),
@@ -148,30 +151,28 @@ class HLAAlleleMapping:
 
     @classmethod
     def load(cls, path):
-        """Load a saved allele mapping without reconstructing phase from dosages.
+        """Load allele calls and mapping data from an NPZ file.
 
         Parameters
         ----------
         path : str or pathlib.Path
-            NPZ sidecar previously written by HLAAlleleMapping.save.
+            File saved by HLAAlleleMapping.save.
 
         Returns
         -------
         HLAAlleleMapping
-            Restored calls, positions, issues and read-only sequence/ID arrays.
-            Motif cache starts empty.
+            Allele calls, sequences and within-gene allele pairs.
 
         Raises
         ------
         ValueError
-            If stored array dimensions or allele IDs are inconsistent.
+            For inconsistent saved array dimensions or allele IDs.
         OSError
-            If the file cannot be opened.
+            If the file cannot be read.
 
         Notes
         -----
-        The TSV fingerprint is checked by read_aa_dosage, not by this standalone
-        loader. No pickle loading or network access is performed.
+        The dosage-file fingerprint is checked by read_aa_dosage.
         """
         with np.load(path, allow_pickle=False) as archive:
             header = json.loads(str(archive["metadata"]))
@@ -216,77 +217,44 @@ def _allele_columns(calls, reference, allele_columns):
 
 
 def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", save_path=None, strict=False, fallback_to_two_field=False):
-    """Map diploid allele calls to amino acid dosages while retaining within-gene phase.
+    """Map paired HLA allele calls to amino-acid dosages.
 
     Parameters
     ----------
     calls : pandas.DataFrame
-        Samples in rows, indexed by unique IID. Default columns are GENE_1 and
-        GENE_2, such as A_1/A_2. MultiIndex columns (gene, 1)/(gene, 2) are also
-        accepted. Values are individual allele names or missing values. Calls
-        may omit the gene prefix when the column identifies the locus.
+        Samples on rows, with paired allele columns such as A_1 and A_2.
     reference : HLAReference or str or pathlib.Path
-        Built reference or path to its saved NPZ file.
-    allele_columns : mapping, optional
-        Gene-to-two-column-name mapping, for example
-        ``{"DRB1": ("DRB1_first", "DRB1_second")}``. Otherwise discover complete
-        column pairs for loci in the reference.
-    output : {"hladata", "dataframe"}, default "hladata"
-        Return an HLAdata object or sample-by-residue pandas DataFrame.
-    save_path : str or pathlib.Path, optional
-        Write dosages as an IID-indexed TSV and mapping as
-        ``<save_path>.phase.npz``. Existing files are overwritten. The sidecar
-        preserves calls, allele IDs, sequences, issues and reference metadata.
+        HLA reference object or path to a saved reference file.
+    allele_columns : mapping or None, default None
+        Gene-to-column-pair mapping. None discovers GENE_1/GENE_2 pairs.
+    output : {'hladata', 'dataframe'}, default 'hladata'
+        Output format.
+    save_path : str or pathlib.Path or None, default None
+        Optional dosage TSV path. Also saves an allele-mapping sidecar.
     strict : bool, default False
-        Raise ValueError instead of returning data if any call or sample-position
-        pair remains unresolved. Successful complete fallbacks are permitted.
+        Raise an error if a call or sample-position remains unresolved.
     fallback_to_two_field : bool, default False
-        If a three/four-field call has no compatible reference record, try
-        two-field consensus while retaining its expression suffix. All matching
-        records contribute known residues at each position; disagreements form
-        combined states such as LVY and entirely unknown positions stay missing.
-        Never replaces an existing but incomplete sequence.
+        Try a two-field match when a higher-resolution allele is unavailable.
 
     Returns
     -------
     HLAdata or pandas.DataFrame
-        Residue dosages 0, 1 or 2, with NaN for every residue state at a sample/
-        position if either allele is unresolved there. Marker names encode gene,
-        AA position, genomic position, exon and residue. Missing coordinates
-        use NA. HLAdata exposes ``hla_mapping``; DataFrame output stores it in
-        ``attrs["hla_mapping"]``. The mapping retains original calls and integer
-        within-gene allele pairs, not cross-gene phase.
+        Amino-acid dosages with the within-gene allele-pair mapping attached.
 
     Raises
     ------
     TypeError
         If calls is not a DataFrame.
     ValueError
-        For invalid sample IDs, columns, allele notation, output selection or
-        unresolved data when strict=True.
-
-    Warns
-    -----
-    UserWarning
-        Summarises unresolved information and use of inferred two-field
-        fallback. Individual absent/fallback calls are recorded in mapping.issues;
-        fallback entries include the original normalised allele and mapped_as.
+        For invalid IDs, allele columns, allele names or output format.
+        Unresolved mappings also raise when strict=True.
+    OSError
+        If a reference file cannot be read or output cannot be written.
 
     Notes
     -----
-    One-field calls are accepted. Conflicting known residues form sorted
-    combined categories such as LVY, counted separately from specific residues.
-    Motifs preserve the actual reference combinations rather than independent
-    combinations of position-wise ambiguous states.
-    Does not modify calls or apply frequency/variation filtering. Monomorphic
-    positions are retained. A known allele is not doubled when its partner is
-    missing. Lower-resolution consensus never arbitrarily chooses a representative
-    sequence. Fallback is an inference, not confirmation of the unavailable allele.
-
-    Examples
-    --------
-    >>> hladat = map_hla_alleles(calls, reference, fallback_to_two_field=True)
-    >>> dosages = map_hla_alleles(calls, reference, output="dataframe")
+    Retains the two allele slots within each gene. Phase between genes is
+    not inferred.
     """
     if not isinstance(calls, pd.DataFrame): raise TypeError("calls must be a pandas DataFrame indexed by IID.")
     if not calls.columns.is_unique: raise ValueError("Allele-call columns must be unique.")
@@ -382,44 +350,32 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
 
 
 def read_aa_dosage(fileloc, *, phase_path=None):
-    """Read mapped amino-acid dosages into an HLAdata object without QC.
+    """Read amino-acid dosages into an HLAdata object.
 
     Parameters
     ----------
     fileloc : pandas.DataFrame or str or pathlib.Path
-        Sample-by-residue dosage DataFrame or tab-separated file with IID in
-        the first column. Marker columns must follow the mapping format
-        AA_GENE_POSITION_COORD_exonEXON_RESIDUE. Coordinates/exons may be NA;
-        position labels may include insertions. Values are nonnegative fractional
-        dosages or missing; imputed values above two are preserved.
-    phase_path : str or pathlib.Path, optional
-        Mapping sidecar for file input. Defaults to ``<fileloc>.phase.npz`` if
-        that file exists. An explicitly requested missing sidecar raises.
-        For DataFrame input, uses attrs["hla_mapping"] instead; phase_path
-        is not consulted.
+        Sample-by-residue dosage DataFrame or TSV file indexed by IID.
+    phase_path : str or pathlib.Path or None, default None
+        Optional allele-mapping sidecar. File input uses <fileloc>.phase.npz
+        when present; DataFrame input uses its hla_mapping attribute.
 
     Returns
     -------
     HLAdata
-        AA data with exon-aware identifiers and nullable coordinate metadata.
-        If mapping is available, also restores hla_mapping, hla_alleles and
-        reference_metadata. Without it, hla_mapping is None and phase is unavailable.
+        Amino-acid dosages and marker annotations, with allele mapping if present.
 
     Raises
     ------
     ValueError
-        For invalid markers/dosages, duplicate columns, sample mismatch, or a
-        dosage file whose fingerprint differs from its phase sidecar.
-    FileNotFoundError
-        If an explicit file/sidecar cannot be found.
+        For invalid markers, dosages, sample IDs or mismatched sidecar data.
+    OSError
+        If the dosage file or requested sidecar cannot be read.
 
     Notes
     -----
-    Preserves string IIDs and does not mutate a supplied DataFrame. TSV input
-    alone cannot recover allele phase or infer an assembly from coordinates.
-    This reader preserves nonnegative fractional amino-acid dosages, including
-    imputed values above two and combined residue labels such as LVY. Values
-    are not clipped, rounded or renormalised. A phase sidecar is optional.
+    Dosage values are preserved. Allele phase is available only when an allele
+    mapping is attached or loaded.
     """
     if isinstance(fileloc, pd.DataFrame):
         mapping = fileloc.attrs.get("hla_mapping")
@@ -452,7 +408,7 @@ def read_aa_dosage(fileloc, *, phase_path=None):
     annotated["TYPE"] = "AA"; annotated["alleleA"] = "P"; annotated["alleleB"] = "A"
     result = HLAdata(annotated, "softcall", load_types=("AA",))
     result.AA.data.drop(columns=["alleleA", "alleleB"], inplace=True)
-    result.AA.info["EXON"] = pd.array([row["EXON"] for row in parsed], dtype="Int64")
+    #result.AA.info["EXON"] = pd.array([row["EXON"] for row in parsed], dtype="Int64")
     result.AA.info["POS"] = pd.array([row["POS"] for row in parsed], dtype="Int64")
     result.hla_mapping = mapping
     if mapping is not None:
@@ -464,43 +420,31 @@ def read_aa_dosage(fileloc, *, phase_path=None):
 
 
 def aa_motif_dosages(data, gene, positions):
-    """Calculate within-gene motif dosages from preserved allele pairs.
+    """Calculate within-gene motif dosages from mapped allele pairs.
 
     Parameters
     ----------
     data : HLAdata, pandas.DataFrame or HLAAlleleMapping
-        Mapped data with hla_mapping (attribute or DataFrame attrs), or the
-        mapping itself. A plain dosage table without phase is insufficient.
+        Mapped data containing the original allele-pair mapping.
     gene : str
-        One mapped locus, optionally prefixed with HLA-. Cross-gene motifs
-        are not supported.
+        HLA gene to map.
     positions : iterable of str or int
-        Nonempty, unique AA position labels in the desired motif order.
-        Use strings for insertion labels such as ``"52i1"``.
+        Amino-acid positions in the required motif order.
 
     Returns
     -------
     pandas.DataFrame
-        Samples by observed motif, with 0/1/2 dosages. Residues are joined by
-        ``|`` in requested position order. If either allele is unknown at any
-        selected position, all motif dosages for that sample are NaN. Attributes
-        include gene, positions, reference_version, allele_groups and N_unresolved.
+        Sample-by-motif counts with unmapped contributions in attrs.
 
     Raises
     ------
     ValueError
-        If phase is unavailable, the locus/positions are unknown, or positions
-        are empty or duplicated.
+        If allele mapping is unavailable or the gene/positions are invalid.
 
     Notes
     -----
-    Motif assignments are cached per gene, reference version and ordered position
-    selection. No statistical test, frequency filtering or cross-gene phase
-    inference is performed.
-
-    Examples
-    --------
-    >>> motifs = aa_motif_dosages(hladat, "DRB1", (11, 13, 71))
+    Uses the stored within-gene allele pairs. Mapped contributions are retained
+    when another allele cannot be mapped.
     """
     mapping = data if isinstance(data, HLAAlleleMapping) else (data.attrs.get("hla_mapping") if isinstance(data, pd.DataFrame) else getattr(data, "hla_mapping", None))
     if mapping is None: raise ValueError("Original allele-pair mapping is required; residue dosages alone do not establish phase.")

@@ -4,11 +4,27 @@ import pandas as pd
 
 
 def build_motif_geno(aadf, info, variant_id, retain_reference=False):
-    """Build a QC-filtered k-1 motif design using explicit motif annotations.
+    """Prepare motif genotypes and metadata for analysis.
 
-    Complete motif labels and unresolved alternative sets are preserved as
-    distinct reported categories. No ambiguity is split into invented dosages.
-    Formula-safe feature names use ordinal IDs; metadata retains motif labels.
+    Parameters
+    ----------
+    aadf : pandas.DataFrame
+        Motif rows and sample columns, with an AA_ID column.
+    info : pandas.DataFrame
+        Matching motif annotations, including MOTIF, GENE and AA_POS.
+    variant_id : str
+        Motif group to analyse.
+    retain_reference : bool, default False
+        Include the reference dosage alongside the model columns.
+
+    Returns
+    -------
+    tuple[pandas.DataFrame, dict]
+        Sample-by-genotype matrix and analysis metadata.
+
+    Notes
+    -----
+    Applies frequency QC and uses the most frequent retained motif as reference.
     """
     frame = aadf.drop(columns=["AA_ID"]).T.astype(float).sort_index()
     labels = dict(zip(frame.columns, info["MOTIF"].astype(str)))
@@ -35,7 +51,7 @@ def build_motif_geno(aadf, info, variant_id, retain_reference=False):
     geno.attrs["residue_labels"] = {f"G_{column}": labels[column] for column in columns}
     meta = {
         "VARIANT": variant_id, "GENE": info["GENE"].iloc[0],
-        "AA_POS": info["AA_POS"].iloc[0], "FEATURE_TYPE": "motif",
+        "AA_POS": info["AA_POS"].iloc[0],
         "Amino_Acids": ", ".join(labels[column] for column in passing),
         "Ref_AA": reference_label, "AAcount": count,
         "AA_AF": ";".join(f"{labels[column]}={frequency[column]:.6g}" for column in passing),

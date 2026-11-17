@@ -1,4 +1,4 @@
-"""Convert fractional HLA allele dosages into amino-acid or motif dosages.
+"""Convert fractional HLA allele dosages into amino-acid or within-gene motif dosages.
 
 Functions
 ---------
@@ -24,39 +24,7 @@ from .hla_resolution import resolve_hla_resolution
 
 
 def _prepare_allele_dosages(dosages, reference, gene, allele_axis, sum_tolerance):
-    """Validate diploid allele dosages and resolve reference sequences.
-
-    Parameters
-    ----------
-    dosages : pandas.DataFrame
-        Numeric nonnegative HLA allele dosages, or NaN. Fractional values and
-        QC-filtered panels are accepted without requiring a total of two.
-        Rows are alleles and columns are samples by default.
-    reference : HLAReference or str or pathlib.Path
-        Local reference object or path to a saved HLA reference NPZ file.
-    gene : str
-        HLA locus, optionally HLA-prefixed, such as DRB1.
-    allele_axis : {'index', 'columns'}
-        Axis containing allele labels.
-    sum_tolerance : float
-        Tolerance for informational comparisons of gene totals against two.
-        Totals never cause rescaling or missing output.
-
-    Returns
-    -------
-    tuple
-        Sample-by-allele dosage array, complete-sample mask, canonical sample
-        index, normalised allele names, allele-by-position sequence array,
-        loaded reference and normalised gene. Missing dosages are replaced by
-        zero internally; the mask preserves sample missingness for callers.
-
-    Raises
-    ------
-    TypeError
-        If dosages is not a DataFrame.
-    ValueError
-        For invalid labels, axes, genes, negative dosages or infinite values.
-    """
+    """Validate allele dosages and resolve their reference sequences."""
     if not isinstance(dosages, pd.DataFrame):
         raise TypeError("dosages must be a pandas DataFrame.")
     if allele_axis not in {"index", "columns"}:
@@ -110,7 +78,7 @@ def _resolved_panels(dosages, gene, allele_axis, sum_tolerance):
             text = str(label).strip().upper().removeprefix("HLA-").removeprefix("HLA_")
             return text.startswith(gene + "*") or text.startswith(gene + "_") or ("*" not in text and "_" not in text)
         data = data.loc[:, [belongs(label) for label in data.columns]].copy()
-        # Let the resolution parser decode explicit Hapy labels at every
+        # Let the resolution parser decode explicit hapy labels at every
         # resolution; the general normaliser deliberately rejects compact 8-digit names.
         data.columns = [label if "*" in str(label) or "_" in str(label)
                         else normalise_hla_allele(label, gene, allow_single_field=True)
@@ -133,39 +101,40 @@ def _check_output(output):
 
 
 def _as_hladata(frame, reference, *, motifs=False):
-    """Wrap converted dosages without applying additional QC or inventing phase."""
+    """Create an HLAdata object from an amino-acid or motif dosage table."""
     from .HLAdat import HLAdata
     from .hla_mapping import read_aa_dosage
 
     metadata = dict(frame.attrs)
     if not motifs:
         result = read_aa_dosage(frame)
-        result.AA.info["FEATURE_TYPE"] = "residue"
+        result.AA.info.drop(columns=["EXON", "FEATURE_TYPE"], errors="ignore", inplace=True)
+        result.AA.info["AA_ID"] = result.AA.info["AA_ID"].astype(str).str.replace(
+            r"_exon(?:NA|\d+)$", "", regex=True)
+        clean_markers = result.AA.data.index.astype(str).str.replace(r"_exon(?:NA|\d+)(?=_)", "", regex=True)
+        result.AA.data.index = clean_markers
+        result.AA.info.index = clean_markers
     else:
         gene, positions = metadata["gene"], metadata["positions"]
         group = f"MOTIF_{gene}_{'-'.join(positions)}"
         labels = list(frame.columns)
-        markers = [f"{group}_{i}" for i in range(len(labels))]
+        markers = [f"{group}_{label}" for label in labels]
         annotated = frame.T.copy()
         annotated.attrs = {}
         annotated.index = markers
         annotated["AA_ID"] = group
         annotated["TYPE"] = "AA"
         annotated["GENE"] = gene
-        annotated["AA_POS"] = "|".join(positions)
+        annotated["AA_POS"] = "-".join(positions)
         annotated["POS"] = pd.NA
         annotated["alleleA"], annotated["alleleB"] = "P", "A"
         result = HLAdata(annotated, "softcall", load_types=("AA",))
         result.AA.data.drop(columns=["alleleA", "alleleB"], inplace=True)
-        result.AA.info["FEATURE_TYPE"] = "motif"
         result.AA.info["MOTIF"] = labels
-        result.AA.info["POSITIONS"] = [positions] * len(labels)
-        result.AA.info["IS_AMBIGUOUS"] = [label.startswith("{") for label in labels]
-        resolution = metadata.get("motif_resolution", {})
-        result.AA.info["IS_INFERRED"] = [any(raw != label and chosen == label
-                                               for raw, chosen in resolution.items())
-                                           for label in labels]
         result.hla_mapping = None
+    result.AA.data.index.name = "SNP"
+    result.AA.info.index.name = "SNP"
+    result.AA.data.columns.name = None
     result.reference_metadata = {"reference_version": reference.version,
                                  "assembly": reference.metadata.get("assembly"),
                                  "imgt_release": reference.metadata.get("imgt_release"),
@@ -175,77 +144,50 @@ def _as_hladata(frame, reference, *, motifs=False):
 
 
 def _representative_motif(label):
-    """Apply the existing AA-block heuristic per position, without inventing a motif."""
-    if label is None or not label.startswith("{"):
-        return label
-    from ..stats.adapters._aa_haplo import checkAAblock
-
-    candidates = [tuple(motif.split("|")) for motif in label[1:-1].split(";")]
-    chosen = [checkAAblock(list(states)) for states in zip(*candidates)]
-    if all(isinstance(state, str) and len(state) == 1 for state in chosen):
-        motif = tuple(chosen)
-        if motif in candidates:
-            return "|".join(motif)
-    return label
+    """Select a representative motif using the AA-block heuristic."""
+    from ._motifs import representative_motif
+    return representative_motif(label)
 
 
 def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
                      sum_tolerance=0.02, unknown_tolerance=1e-8, output="hladata"):
-    """Convert overlapping HLA allele dosages into fractional AA state dosages.
+    """Convert HLA allele dosages into fractional amino-acid dosages.
 
     Parameters
     ----------
     dosages : pandas.DataFrame
-        Default hladat.HLA.data format: HLA allele rows and sample columns.
-        May contain multiple genes, overlapping resolutions and QC-filtered
-        allele panels. All available fractional contributions are preserved;
-        totals need not equal two and individual dosages may exceed two.
+        HLA allele dosages, with alleles on rows and samples on columns.
     reference : HLAReference or str or pathlib.Path
-        Local reference object or path to a saved reference NPZ file.
-    gene : str, optional
-        Select one locus, such as DRB1. By default process all input genes.
+        HLA reference object or path to a saved reference file.
+    gene : str or None, default None
+        HLA gene to map. None maps all genes in the input.
     allele_axis : {'index', 'columns'}, default 'index'
-        Axis containing allele labels; 'columns' means sample-by-allele input.
+        Axis containing the HLA allele labels.
     sum_tolerance : float, default 0.02
-        Tolerance used only to report counts of gene totals differing from two.
-        It does not filter, rescale or replace any fractional values.
+        Tolerance for reporting gene totals that differ from two.
     unknown_tolerance : float, default 1e-8
-        Maximum unresolved sequence dosage before output becomes missing.
-
+        Maximum unmapped dosage before an AA position is set to missing.
     output : {'hladata', 'dataframe'}, default 'hladata'
-        Return a hapy HLAdata object, or the sample-by-state dosage DataFrame.
+        Output format.
 
     Returns
     -------
     HLAdata or pandas.DataFrame
-        By default, a softcall HLAdata object with residue markers on AA.data
-        rows, samples on columns, and aligned annotations in AA.info.
-        conversion_metadata records genes, reference version and missing-panel
-        counts. With output='dataframe', samples are rows and states are columns.
-        Conflicting residues retain combined labels such as LVY; existing
-        downstream ambiguous-AA handling is unchanged.
+        AA.data and AA.info, or a sample-by-residue dosage DataFrame.
 
     Raises
     ------
     TypeError
         If dosages is not a DataFrame.
     ValueError
-        For invalid labels, dosages, tolerances or missing reference genes.
+        For invalid labels, dosages, tolerances, output format or reference gene.
+    OSError
+        If the reference file cannot be read.
 
     Notes
     -----
-    Overlapping resolutions are resolved before mapping each gene. One-field
-    remainders use matching reference sequences. Entirely unknown positions
-    remain missing when their dosage exceeds unknown_tolerance. No chromosome
-    phase is inferred. Values are not clipped, rounded, rescaled or downcast to
-    float32. Totals differing from two are reported in N_invalid_totals for
-    compatibility; that metadata is informational and does not mask samples.
-    Missing input or unresolved sequence may still produce NaN.
-
-    Examples
-    --------
-    >>> aa = hla_dosage_to_aa(hladat.HLA.data, reference)
-    >>> drb1 = hla_dosage_to_aa(hladat.HLA.data, reference, gene="DRB1")
+    Overlapping resolutions are resolved before mapping. Fractional values are
+    preserved; missing input or unavailable sequence may produce NaN.
     """
     _check_output(output)
     _check_unknown_tolerance(unknown_tolerance)
@@ -296,40 +238,32 @@ def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
 def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
                          allele_axis="index", sum_tolerance=0.02,
                          unknown_tolerance=1e-8, output="hladata"):
-    """Convert HLA allele dosages into expected within-gene motif counts.
+    """Convert HLA allele dosages into fractional within-gene motif dosages.
 
     Parameters
     ----------
     dosages : pandas.DataFrame
-        Default hladat.HLA.data format: HLA allele rows and sample columns.
-        May include all genes and overlapping resolutions; the selected gene
-        is resolved automatically before mapping.
+        HLA allele dosages, with alleles on rows and samples on columns.
     reference : HLAReference or str or pathlib.Path
-        Local reference object or path to a saved HLA reference NPZ file.
+        HLA reference object or path to a saved reference file.
     gene : str
-        HLA locus, optionally HLA-prefixed, such as DRB1.
+        HLA gene to map, such as DRB1.
     positions : iterable of str or int
-        Nonempty unique AA position labels, in the order to join residues.
+        Amino-acid positions in the required motif order.
     allele_axis : {'index', 'columns'}, default 'index'
-        Axis containing allele labels. Use 'columns' for sample-by-allele input.
+        Axis containing the HLA allele labels.
     sum_tolerance : float, default 0.02
-        Tolerance for informational comparisons of gene totals against two.
-        Totals never cause rescaling or missing output.
+        Tolerance for reporting gene totals that differ from two.
     unknown_tolerance : float, default 1e-8
-        Maximum dosage on unresolved sequence before the output is missing.
-
+        Tolerance for reporting unmapped motif dosage.
     output : {'hladata', 'dataframe'}, default 'hladata'
-        Return a hapy HLAdata object, or the sample-by-state dosage DataFrame.
+        Output format.
 
     Returns
     -------
     HLAdata or pandas.DataFrame
-        By default, a softcall HLAdata object with motif markers on AA.data rows
-        and samples on columns. AA.info contains MOTIF, POSITIONS, IS_AMBIGUOUS
-        and IS_INFERRED annotations. All motifs share one AA_ID for analysis
-        with kind='AA'. conversion_metadata retains allele groups, original
-        candidate labels and missing-panel counts. With output='dataframe',
-        samples are rows and motif labels are columns.
+        AA.data and AA.info for motif analysis, or a sample-by-motif DataFrame.
+        Unmapped contributions are recorded in the output metadata.
 
     Raises
     ------
@@ -337,28 +271,13 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
         If dosages is not a DataFrame.
     ValueError
         For invalid inputs, unknown positions or empty/duplicate positions.
+    OSError
+        If the reference file cannot be read.
 
     Notes
     -----
-    The existing checkAAblock heuristic is applied independently at each
-    requested position. A representative motif is used only when each position
-    resolves to one residue and the combination exists among the reference
-    candidates. Ties and unsupported combinations retain their alternatives,
-    such as {L|A|R;V|G|R}. This is a representative heuristic, not a posterior
-    probability assignment; original alternatives remain in conversion_metadata.
-    Each motif combines residues carried by one HLA allele. Dosages of alleles
-    carrying the same motif are summed, allowing within-gene motif analysis
-    without chromosome-specific assignments. Cross-gene phase is not inferred.
-    Unresolved sequence dosage above unknown_tolerance or missing input makes
-    motif values missing. Available fractional contributions otherwise remain
-    unchanged, even above two or when their gene total differs from two.
-    No clipping, rounding, renormalisation or float32 downcast is applied.
-
-    Examples
-    --------
-    >>> motifs = hla_dosage_to_motifs(
-    ...     dosages, reference, gene="DRB1", positions=[11, 13, 51]
-    ... )
+    Motifs are formed within one gene. Mapped contributions are retained and
+    unmapped dosage is reported separately. Ambiguity uses checkAAblock.
     """
     _check_output(output)
     _check_unknown_tolerance(unknown_tolerance)
@@ -384,17 +303,25 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
                             dtype=np.float64).reshape(len(names), len(labels))
     values = X @ indicators
     unknown_mass = X @ np.asarray([m is None for m in motifs], dtype=np.float64)
-    values[(~complete) | (unknown_mass > unknown_tolerance), :] = np.nan
+    known_mass = X @ np.asarray([m is not None for m in motifs], dtype=np.float64)
+    unresolved = (~complete) | (unknown_mass > unknown_tolerance)
+    missing = unresolved & (known_mass == 0)
+    values[missing, :] = np.nan
+    unmapped = np.where(complete, unknown_mass, np.nan)
     result = pd.DataFrame(values, index=samples, columns=labels)
     result.attrs.update({
         "gene": gene,
         "positions": positions,
+        "dosage_type": "expected_motif_dosage",
         "motif_resolution": {raw: chosen for raw, chosen in zip(raw_motifs, motifs)
                              if raw is not None},
         "reference_version": reference.version,
         "N_invalid_totals": panels[gene].attrs["N_invalid_totals"],
         "allele_groups": {label: [name for name, motif in zip(names, motifs)
                                   if motif == label] for label in labels},
-        "N_unresolved": int(((~complete) | (unknown_mass > unknown_tolerance)).sum()),
+        "unmapped_dosage": dict(zip(samples, unmapped.tolist())),
+        "N_unresolved": int(unresolved.sum()),
+        "N_partial": int((unresolved & ~missing).sum()),
+        "N_missing": int(missing.sum()),
     })
     return result if output == "dataframe" else _as_hladata(result, reference, motifs=True)

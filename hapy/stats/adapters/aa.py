@@ -71,7 +71,7 @@ def aa_allele_frequency(aminoacid_df, calltype, refAA, effect_allele=None):
     
     aa_freq = {}
     for k, v in tmp.items():
-        if len(k)==1:
+        if len(k)==1 or k == "asterisk":
             aa_freq[k]=v
     
     if aa_freq:
@@ -107,30 +107,28 @@ class AAAdapter:
 
     @staticmethod
     def build_geno(hladat, variant_id: str, sample_index: pd.Index, retain_reference: bool = False) -> tuple[pd.DataFrame, dict]:
-        """
-        Build genotype feature matrix for one AA_ID.
+        """Build genotype features for one AA or motif group.
 
         Parameters
         ----------
-        hladat:
-            HLAdat object with fields:
-                - hladat.AA.data: variants x samples
-                - hladat.AA.info: variant annotations including AA_ID
-                - hladat.type: "softcall" or "hardcall"
-        variant_id:
-            AA_ID key to subset.
+        hladat : HLAdata
+            Genotypes and annotations in AA.data and AA.info.
+        variant_id : str
+            AA_ID group to analyse.
+        sample_index : pandas.Index
+            Sample IDs to include.
         retain_reference : bool, default False
-            Retain QC-passing reference dosages for OVR tests. The original
-            non-reference design is recorded in DataFrame.attrs["test_columns"].
-        sample_index:
-            IID index for analysis (strings). Used to subset genotype columns.
+            Include the QC-passing reference dosage in the output.
 
         Returns
         -------
-        geno_df:
-            DataFrame indexed by IID with numeric feature columns (prefixed "G_").
-        meta:
-            Dict of annotations useful for output tables.
+        tuple[pandas.DataFrame, dict]
+            Sample-by-genotype matrix with G_ columns and analysis metadata.
+
+        Raises
+        ------
+        ValueError
+            If no genotype samples overlap or the genotype input is invalid.
         """
         info = hladat.AA.info
 
@@ -148,8 +146,7 @@ class AAAdapter:
 
         aadf["AA_ID"] = aainfo["AA_ID"].to_numpy()
 
-        if ("FEATURE_TYPE" in aainfo and aainfo["FEATURE_TYPE"].eq("motif").all()
-                and len(aainfo)):
+        if (len(aainfo) and aainfo["AA_ID"].astype(str).str.startswith("MOTIF_").all()):
             from ._motif import build_motif_geno
             return build_motif_geno(aadf, aainfo, variant_id, retain_reference)
 
