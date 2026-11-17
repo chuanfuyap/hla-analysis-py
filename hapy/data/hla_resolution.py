@@ -1,4 +1,5 @@
-"""Resolve overlapping HLA dosage markers into non-overlapping allele dosages."""
+"""Resolve HLA allele dosages, prioritising the lowest available
+resolution (minimum two fields) without modifying retained dosages."""
 
 import re
 
@@ -74,7 +75,11 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
             digits = fields.replace(":", "")
         else:
             gene, digits, suffix = match.groups()
-        # (digits, expression_suffix, input column), grouped by HLA gene.
+        # Exclude alleles below two-field resolution.
+        if len(digits) < 4:
+            continue
+
+        # Group alleles by HLA gene.
         groups.setdefault(gene.upper(), []).append((digits, suffix, column))
 
     if not groups:
@@ -116,37 +121,43 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
             digits, suffix = node
             return (digits[:-2], "") if len(digits) > 2 else None
 
-        # Process longer names first; children always precede their parents.
-        order = sorted(nodes, key=lambda node: (-len(node[0]), node[0], node[1]))
-        incoming = {}  # Accumulated subtree dosage from already-processed children.
-        retained = {}  # Non-overlapping mass assigned exactly at this node.
+        
+        # Process lower-resolution alleles first.
+        order = sorted(nodes, key=lambda node: (len(node[0]), node[0], node[1]))
+
+        covered = {}
+        retained = {}
         totals = np.zeros(n, dtype=np.float64)
 
         for node in order:
-            child_mass = incoming.pop(node, None)
-            if child_mass is None:
-                child_mass = np.zeros(n, dtype=np.float64)
-
-            if node in column_index:
-                observed = X[:, column_index[node]]
-                known = np.isfinite(observed)
-                # Higher-resolution dosage takes precedence. A smaller parent
-                # contributes no additional mass and never rejects descendants.
-                remainder = np.where(known, np.maximum(observed - child_mass, 0.0), 0.0)
-                if np.any(remainder > 0):
-                    retained[node] = remainder
-            else:
-                remainder = None
-
-            mass = child_mass if remainder is None else child_mass + remainder
             ancestor = parent(node)
-            if ancestor is None:
-                totals += mass
-            else:
-                if ancestor not in incoming:
-                    incoming[ancestor] = mass.copy()
-                else:
-                    incoming[ancestor] += mass
+
+            # Samples already represented by a lower-resolution allele.
+            ancestor_covered = (
+                covered[ancestor]
+                if ancestor is not None
+                else np.zeros(n, dtype=bool)
+            )
+
+            if node not in column_index:
+                covered[node] = ancestor_covered
+                continue
+
+            observed = X[:, column_index[node]]
+            known = np.isfinite(observed)
+
+            # Retain the original dosage only when no ancestor
+            # has an available dosage for this sample.
+            selected = known & ~ancestor_covered
+
+            covered[node] = ancestor_covered | selected
+
+            values = np.where(selected, observed, 0.0)
+
+            if np.any(selected):
+                retained[node] = values
+
+            totals += values
 
         bad = ~np.isfinite(totals) | (np.abs(totals - 2.0) > tolerance)
         if bad.any() and invalid_totals == "raise":
@@ -175,7 +186,7 @@ def resolve_hla_resolution(df: pd.DataFrame, *, tolerance: float = 0.02,
         result.loc[~np.isfinite(X).any(axis=1), :] = np.nan
         if bad.any() and invalid_totals == "missing":
             result.loc[bad, :] = np.nan
-        result.attrs.update({"gene": gene, "resolution": "highest_available_per_sample",
+        result.attrs.update({"gene": gene, "resolution": "lowest_available_min_two_fields",
                              "sum_tolerance": tolerance, "N_invalid_totals": int(bad.sum())})
         outputs[gene] = result
 

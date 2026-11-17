@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 from .hla_reference import HLAReference, load_hla_reference, normalise_hla_allele, _normalise_gene, _sha
 from .HLAdat import HLAdata
+from ._mapping_io import MappingReport
 from ._motifs import motif_from_sequences, representative_motif
 from ..stats.preprocess import sample_index
 
@@ -21,7 +22,7 @@ def parse_aa_marker(marker):
     match = _MARKER.fullmatch(str(marker))
     if not match or (match[4] != "NA" and int(match[4]) <= 0):
         raise ValueError(f"Invalid mapped AA marker {marker!r}.")
-    return {"AA_ID": match[1], "GENE": match[2], "AA_POS": match[3],
+    return {"AA_ID": f"AA_{match[2]}_{match[3]}_{match[4]}", "GENE": match[2], "AA_POS": match[3],
             "POS": None if match[4] == "NA" else int(match[4]),
             "EXON": None if match[5] in {None, "NA"} else int(match[5]), "RESIDUE": match[6]}
 
@@ -216,7 +217,9 @@ def _allele_columns(calls, reference, allele_columns):
     return columns
 
 
-def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", save_path=None, strict=False, fallback_to_two_field=False):
+def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata",
+                    save_path=None, strict=False, fallback_to_two_field=False,
+                    simpleQC=True, allele_filter=0.005, verbose=True):
     """Map paired HLA allele calls to amino-acid dosages.
 
     Parameters
@@ -235,6 +238,12 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
         Raise an error if a call or sample-position remains unresolved.
     fallback_to_two_field : bool, default False
         Try a two-field match when a higher-resolution allele is unavailable.
+    simpleQC : bool, default True
+        Apply the simple MAF filter to mapped output states.
+    allele_filter : float, default 0.005
+        Minimum allele frequency; states must also be below 1 - allele_filter.
+    verbose : bool, default True
+        Print mapping, QC and timing summaries.
 
     Returns
     -------
@@ -246,7 +255,7 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     TypeError
         If calls is not a DataFrame.
     ValueError
-        For invalid IDs, allele columns, allele names or output format.
+        For invalid IDs, allele columns/names, output format or MAF threshold.
         Unresolved mappings also raise when strict=True.
     OSError
         If a reference file cannot be read or output cannot be written.
@@ -256,6 +265,8 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     Retains the two allele slots within each gene. Phase between genes is
     not inferred.
     """
+    report = MappingReport("MAPPING HLA ALLELES TO AMINO ACIDS", simpleQC=simpleQC,
+                           allele_filter=allele_filter, verbose=verbose, output=output)
     if not isinstance(calls, pd.DataFrame): raise TypeError("calls must be a pandas DataFrame indexed by IID.")
     if not calls.columns.is_unique: raise ValueError("Allele-call columns must be unique.")
     if output not in {"hladata", "dataframe"}: raise ValueError("output must be 'hladata' or 'dataframe'.")
@@ -269,10 +280,12 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     frames = []
     unresolved = 0
     fallbacks = []
+    n_hla = 0
     for gene, pair in columns.items():
         allow_single = True
         normal = [[normalise_hla_allele(v, gene, allow_single_field=allow_single) for v in original[col]] for col in pair]
         unique = sorted({name for slot in normal for name in slot if name is not None})
+        n_hla += len(unique)
         labels, sequences = [""], [np.full(len(reference.positions[gene]), "?", dtype="U1")]
         codes = {None: 0}
         sources = [None]
@@ -342,11 +355,14 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata", 
     result = pd.concat(frames, axis=1) if frames else pd.DataFrame(index=original.index)
     result.attrs["hla_mapping"] = mapping
     result.attrs["reference_metadata"] = dict(metadata)
+    result = report.process(result, n_hla)
     if save_path is not None:
         result.to_csv(save_path, sep="\t", index=True, index_label="IID", na_rep="NA")
         mapping.dosage_file_sha256 = _sha(save_path)
         mapping.save(str(save_path) + ".phase.npz")
-    return result if output == "dataframe" else read_aa_dosage(result)
+    converted = result if output == "dataframe" else read_aa_dosage(result)
+    report.finish(result)
+    return converted
 
 
 def read_aa_dosage(fileloc, *, phase_path=None):
@@ -419,7 +435,8 @@ def read_aa_dosage(fileloc, *, phase_path=None):
     return result
 
 
-def aa_motif_dosages(data, gene, positions):
+def aa_motif_dosages(data, gene, positions, *, output="hladata", simpleQC=True,
+                     allele_filter=0.005, verbose=True):
     """Calculate within-gene motif dosages from mapped allele pairs.
 
     Parameters
@@ -430,22 +447,43 @@ def aa_motif_dosages(data, gene, positions):
         HLA gene to map.
     positions : iterable of str or int
         Amino-acid positions in the required motif order.
+    output : {'hladata', 'dataframe'}, default 'hladata'
+        Return HLAdata for analysis, or a sample-by-motif dosage DataFrame.
+    simpleQC : bool, default True
+        Apply the simple MAF filter to mapped output states.
+    allele_filter : float, default 0.005
+        Minimum allele frequency; states must also be below 1 - allele_filter.
+    verbose : bool, default True
+        Print mapping, QC and timing summaries.
 
     Returns
     -------
-    pandas.DataFrame
-        Sample-by-motif counts with unmapped contributions in attrs.
+    HLAdata or pandas.DataFrame
+        HLAdata with motif genotypes, annotations and the original allele
+        mapping, or a sample-by-motif DataFrame with mapping metadata in attrs.
 
     Raises
     ------
     ValueError
-        If allele mapping is unavailable or the gene/positions are invalid.
+        For missing allele mapping, invalid gene/positions, output format
+        or MAF threshold.
 
     Notes
     -----
     Uses the stored within-gene allele pairs. Mapped contributions are retained
     when another allele cannot be mapped.
     """
+    report = MappingReport("MAPPING HLA ALLELE PAIRS TO MOTIFS", simpleQC=simpleQC,
+                           allele_filter=allele_filter, verbose=verbose, output=output)
     mapping = data if isinstance(data, HLAAlleleMapping) else (data.attrs.get("hla_mapping") if isinstance(data, pd.DataFrame) else getattr(data, "hla_mapping", None))
     if mapping is None: raise ValueError("Original allele-pair mapping is required; residue dosages alone do not establish phase.")
-    return mapping.motif_dosages(gene, positions)
+    frame = mapping.motif_dosages(gene, positions)
+    locus = frame.attrs["gene"]
+    frame = report.process(frame, len(mapping.alleles[locus]) - 1)
+    if output == "dataframe":
+        converted = frame
+    else:
+        from .hla_dosage import _as_hladata
+        converted = _as_hladata(frame, motifs=True, mapping=mapping)
+    report.finish(frame, motifs=True)
+    return converted

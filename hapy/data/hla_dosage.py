@@ -21,6 +21,7 @@ from .hla_reference import (
 )
 from ..stats.preprocess import sample_index
 from .hla_resolution import resolve_hla_resolution
+from ._mapping_io import MappingReport
 
 
 def _prepare_allele_dosages(dosages, reference, gene, allele_axis, sum_tolerance):
@@ -100,7 +101,7 @@ def _check_output(output):
         raise ValueError("output must be 'hladata' or 'dataframe'.")
 
 
-def _as_hladata(frame, reference, *, motifs=False):
+def _as_hladata(frame, reference=None, *, motifs=False, mapping=None):
     """Create an HLAdata object from an amino-acid or motif dosage table."""
     from .HLAdat import HLAdata
     from .hla_mapping import read_aa_dosage
@@ -135,10 +136,16 @@ def _as_hladata(frame, reference, *, motifs=False):
     result.AA.data.index.name = "SNP"
     result.AA.info.index.name = "SNP"
     result.AA.data.columns.name = None
-    result.reference_metadata = {"reference_version": reference.version,
-                                 "assembly": reference.metadata.get("assembly"),
-                                 "imgt_release": reference.metadata.get("imgt_release"),
-                                 "phase_available": False}
+    if mapping is not None:
+        result.hla_mapping = mapping
+        result.hla_alleles = mapping.calls.copy(deep=True)
+        result.reference_metadata = dict(mapping.metadata)
+        result.reference_metadata["phase_available"] = True
+    else:
+        result.reference_metadata = {"reference_version": reference.version,
+                                     "assembly": reference.metadata.get("assembly"),
+                                     "imgt_release": reference.metadata.get("imgt_release"),
+                                     "phase_available": False}
     result.conversion_metadata = metadata
     return result
 
@@ -150,7 +157,8 @@ def _representative_motif(label):
 
 
 def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
-                     sum_tolerance=0.02, unknown_tolerance=1e-8, output="hladata"):
+                     sum_tolerance=0.02, unknown_tolerance=1e-8, output="hladata",
+                     simpleQC=True, allele_filter=0.005, verbose=True):
     """Convert HLA allele dosages into fractional amino-acid dosages.
 
     Parameters
@@ -169,6 +177,12 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
         Maximum unmapped dosage before an AA position is set to missing.
     output : {'hladata', 'dataframe'}, default 'hladata'
         Output format.
+    simpleQC : bool, default True
+        Apply the simple MAF filter to mapped output states.
+    allele_filter : float, default 0.005
+        Minimum allele frequency; states must also be below 1 - allele_filter.
+    verbose : bool, default True
+        Print mapping, QC and timing summaries.
 
     Returns
     -------
@@ -189,6 +203,8 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
     Overlapping resolutions are resolved before mapping. Fractional values are
     preserved; missing input or unavailable sequence may produce NaN.
     """
+    report = MappingReport("MAPPING FRACTIONAL HLA DOSAGES TO AMINO ACIDS", simpleQC=simpleQC,
+                           allele_filter=allele_filter, verbose=verbose, output=output)
     _check_output(output)
     _check_unknown_tolerance(unknown_tolerance)
     if not isinstance(reference, HLAReference):
@@ -208,7 +224,10 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
                                               for locus, panel in panels.items()}})
     if len(panels) == 1:
         result.attrs["gene"] = next(iter(panels))
-    return result if output == "dataframe" else _as_hladata(result, reference)
+    result = report.process(result, sum(len(panel.columns) for panel in panels.values()))
+    converted = result if output == "dataframe" else _as_hladata(result, reference)
+    report.finish(result)
+    return converted
 
 
 def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
@@ -237,7 +256,8 @@ def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
 
 def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
                          allele_axis="index", sum_tolerance=0.02,
-                         unknown_tolerance=1e-8, output="hladata"):
+                         unknown_tolerance=1e-8, output="hladata", simpleQC=True,
+                         allele_filter=0.005, verbose=True):
     """Convert HLA allele dosages into fractional within-gene motif dosages.
 
     Parameters
@@ -258,6 +278,12 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
         Tolerance for reporting unmapped motif dosage.
     output : {'hladata', 'dataframe'}, default 'hladata'
         Output format.
+    simpleQC : bool, default True
+        Apply the simple MAF filter to mapped output states.
+    allele_filter : float, default 0.005
+        Minimum allele frequency; states must also be below 1 - allele_filter.
+    verbose : bool, default True
+        Print mapping, QC and timing summaries.
 
     Returns
     -------
@@ -279,6 +305,8 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
     Motifs are formed within one gene. Mapped contributions are retained and
     unmapped dosage is reported separately. Ambiguity uses checkAAblock.
     """
+    report = MappingReport("MAPPING FRACTIONAL HLA DOSAGES TO MOTIFS", simpleQC=simpleQC,
+                           allele_filter=allele_filter, verbose=verbose, output=output)
     _check_output(output)
     _check_unknown_tolerance(unknown_tolerance)
     gene = _normalise_gene(gene)
@@ -324,4 +352,7 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
         "N_partial": int((unresolved & ~missing).sum()),
         "N_missing": int(missing.sum()),
     })
-    return result if output == "dataframe" else _as_hladata(result, reference, motifs=True)
+    result = report.process(result, len(names))
+    converted = result if output == "dataframe" else _as_hladata(result, reference, motifs=True)
+    report.finish(result, motifs=True)
+    return converted

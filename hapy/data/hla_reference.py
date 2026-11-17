@@ -280,7 +280,7 @@ def _coordinates(gene, names, matrix, positions, nucleotide_file, annotation_dir
     protein = _translation(cds)
     n_names, n_matrix, _, n_reference, n_release = _alignment(nucleotide_file, gene, protein=False)
     n_matches = {name for name, row in zip(n_names, n_matrix) if "".join(row).replace(".", "").rstrip("?") == cds}
-    protein_matches = [i for i, row in enumerate(matrix) if "".join(row).replace(".", "").rstrip("?").removesuffix("X") == protein]
+    protein_matches = [i for i, row in enumerate(matrix) if "".join(row).replace(".", "").rstrip("?*").removesuffix("X") == protein]
     exact = [i for i in protein_matches if names[i] in n_matches]
     match_rows = exact or protein_matches
     if not match_rows:
