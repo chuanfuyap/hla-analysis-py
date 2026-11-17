@@ -15,6 +15,7 @@ import pandas as pd
 
 from .hla_reference import (
     HLAReference,
+    _ALLELE,
     _normalise_gene,
     load_hla_reference,
     normalise_hla_allele,
@@ -24,7 +25,8 @@ from .hla_resolution import resolve_hla_resolution
 from ._mapping_io import MappingReport
 
 
-def _prepare_allele_dosages(dosages, reference, gene, allele_axis, sum_tolerance):
+def _prepare_allele_dosages(dosages, reference, gene, allele_axis, sum_tolerance, *,
+                            fallback_to_two_field=False, fallbacks=None):
     """Validate allele dosages and resolve their reference sequences."""
     if not isinstance(dosages, pd.DataFrame):
         raise TypeError("dosages must be a pandas DataFrame.")
@@ -61,6 +63,15 @@ def _prepare_allele_dosages(dosages, reference, gene, allele_axis, sum_tolerance
     rows = []
     for name in names:
         row = reference.resolve(name)
+        if row is None and fallback_to_two_field:
+            match = _ALLELE.fullmatch(name)
+            fields = match[2].split(":")
+            if len(fields) > 2:
+                target = gene + "*" + ":".join(fields[:2]) + match[3]
+                row = reference.resolve(target)
+                if row is not None and fallbacks is not None:
+                    fallbacks.append({"allele": name, "mapped_as": target,
+                                      "reason": "two-field consensus fallback"})
         rows.append(unknown if row is None else row)
     sequences = np.stack(rows)
     return X, complete, sample_ids, names, sequences, reference, gene
@@ -158,7 +169,8 @@ def _representative_motif(label):
 
 def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
                      sum_tolerance=0.02, unknown_tolerance=1e-8, output="hladata",
-                     simpleQC=True, allele_filter=0.005, verbose=True):
+                     simpleQC=True, allele_filter=0.005, verbose=True,
+                     fallback_to_two_field=True):
     """Convert HLA allele dosages into fractional amino-acid dosages.
 
     Parameters
@@ -175,6 +187,8 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
         Tolerance for reporting gene totals that differ from two.
     unknown_tolerance : float, default 1e-8
         Tolerance for reporting unresolved dosage.
+    fallback_to_two_field : bool, default True
+        Use a two-field consensus when a higher-resolution allele is absent.
     output : {'hladata', 'dataframe'}, default 'hladata'
         Output format.
     simpleQC : bool, default True
@@ -214,7 +228,8 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
     for locus, panel in panels.items():
         frame = _gene_dosage_to_aa(panel, reference, locus, allele_axis="columns",
                                   sum_tolerance=sum_tolerance,
-                                  unknown_tolerance=unknown_tolerance)
+                                  unknown_tolerance=unknown_tolerance,
+                                  fallback_to_two_field=fallback_to_two_field)
         resolution[locus] = dict(frame.attrs)
         frame.attrs = {}
         frames.append(frame)
@@ -233,10 +248,13 @@ def hla_dosage_to_aa(dosages, reference, gene=None, *, allele_axis="index",
 
 
 def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
-                     sum_tolerance=0.02, unknown_tolerance=1e-8):
+                     sum_tolerance=0.02, unknown_tolerance=1e-8,
+                     fallback_to_two_field=True):
     """Map one already-resolved, non-overlapping gene panel to AA states."""
+    fallbacks = []
     X, complete, samples, names, matrix, reference, gene = _prepare_allele_dosages(
-        dosages, reference, gene, allele_axis, sum_tolerance
+        dosages, reference, gene, allele_axis, sum_tolerance,
+        fallback_to_two_field=fallback_to_two_field, fallbacks=fallbacks
     )
     frames, unmapped, partial_counts, missing_counts = [], {}, {}, {}
     observed = dosages.T if allele_axis == "index" else dosages
@@ -265,6 +283,7 @@ def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
     result.attrs.update({"gene": gene, "reference_version": reference.version,
                          "dosage_type": "expected_aa_dosage",
                          "unmapped_dosage": unmapped,
+                         "fallbacks": fallbacks,
                          "incomplete_input": dict(zip(samples, (~complete).tolist())),
                          "N_partial": partial_counts, "N_missing": missing_counts})
     return result

@@ -218,7 +218,7 @@ def _allele_columns(calls, reference, allele_columns):
 
 
 def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata",
-                    save_path=None, strict=False, fallback_to_two_field=False,
+                    save_path=None, strict=False, fallback_to_two_field=True,
                     simpleQC=True, allele_filter=0.005, verbose=True):
     """Map paired HLA allele calls to amino-acid dosages.
 
@@ -236,7 +236,7 @@ def map_hla_alleles(calls, reference, *, allele_columns=None, output="hladata",
         Optional dosage TSV path. Also saves an allele-mapping sidecar.
     strict : bool, default False
         Raise an error if a call or sample-position remains unresolved.
-    fallback_to_two_field : bool, default False
+    fallback_to_two_field : bool, default True
         Try a two-field match when a higher-resolution allele is unavailable.
     simpleQC : bool, default True
         Apply the simple MAF filter to mapped output states.
