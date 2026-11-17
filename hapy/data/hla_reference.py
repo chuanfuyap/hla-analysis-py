@@ -341,7 +341,7 @@ def _coordinates(gene, names, matrix, positions, nucleotide_file, annotation_dir
 
 
 def _reference_identity(alleles, matrices, positions, metadata):
-    info = {k: v for k, v in metadata.items() if k != "reference_version"}
+    info = {k: v for k, v in metadata.items() if k not in {"reference_version", "inferred_positions"}}
     info["source_sha256"] = sorted(info["source_sha256"].values())
     digest = hashlib.sha256(json.dumps(info, sort_keys=True).encode())
     for gene in metadata["genes"]:
@@ -385,8 +385,8 @@ class HLAReference:
 
         Notes
         -----
-        Low-resolution matches may produce combined states such as LVY.
-        '*' and '.' are mapped states; '?' denotes unavailable sequence.
+        Known residues must agree across matching alleles. Missing or conflicting
+        states resolve to '?'. Inferred positions are stored in metadata.
         """
         allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None: return None
@@ -407,11 +407,16 @@ class HLAReference:
                 return None
         sequences = self.matrices[gene][ids]
 
-        # Variable-width strings preserve ambiguous states such as LVY.
-        result = np.asarray([
-            "".join(sorted(set(column[column != "?"]))) if (column != "?").any() else "?"
-            for column in sequences.T
-        ])
+        known = (sequences != "*") & (sequences != "?")
+        has_known = known.any(axis=0)
+        first = sequences[known.argmax(axis=0), np.arange(sequences.shape[1])]
+        agrees = ((sequences == first) | ~known).all(axis=0)
+        assigned = has_known & agrees
+        result = np.where(assigned, first, "?")
+        inferred = assigned & (~known).any(axis=0)
+        self.metadata.setdefault("inferred_positions", {})[allele] = (
+            self.positions[gene].loc[inferred, "AA_POS"].astype(str).tolist()
+        )
         result.flags.writeable = False
         self._resolved[allele] = result
         return result
@@ -633,6 +638,11 @@ def build_hla_reference(alignment_dir, *, genes=GENES, annotation_dir=None,
     # Paths do not affect content identity, but distinct releases/annotations do.
     meta["reference_version"] = _reference_identity(alleles, matrices, info, meta)
     result = HLAReference(alleles, matrices, info, meta)
+    for gene, names in alleles.items():
+        prefixes = sorted({gene + "*" + ":".join(name.split("*")[1].split(":")[:2])
+                           for name in names if len(name.split("*")[1].split(":")) >= 2})
+        for allele in prefixes:
+            result.resolve(allele)
     if coordinate_checks is not None:
         checks = coordinate_checks if isinstance(coordinate_checks, pd.DataFrame) else pd.read_csv(coordinate_checks, sep="\t", dtype={"AA_POS": str})
         for _, row in checks.iterrows():
