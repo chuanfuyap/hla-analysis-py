@@ -213,7 +213,9 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
             else:
                 row.update(fit_univariate(abt, geno_cols[0], covar_cols_local, model_type))
         else:
-            row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type, null_cache=null_cache))
+            row.update(fit_omnibus(abt, geno_cols, covar_cols_local, model_type, null_cache=null_cache,
+                                   term_labels=aa_geno.attrs.get("residue_labels", {})
+                                   if aa_geno is not None else None))
     if not residue or aa_geno is None:
         return row
     rows = [row]

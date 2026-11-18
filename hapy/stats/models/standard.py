@@ -84,7 +84,7 @@ def fit_standard_null(abt, covar_cols, model_type):
                         (formula, tuple(covar_cols)), info)
 
 
-def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], model_type: str, *, null_cache=None) -> dict:
+def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], model_type: str, *, null_cache=None, term_labels=None) -> dict:
     """
     Fit an omnibus association test for multiple genotype columns.
 
@@ -142,11 +142,14 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
         #"geno_terms": ",".join(present) if present else None,
     }
 
+    labels = term_labels or {}
     out["Beta"] = ";".join(
-        f"{term.split('_')[1]}={alt.params[term]:.12g}" for term in geno_terms
+        f"{labels.get(column, column.removeprefix('G_'))}={alt.params[term]:.12g}"
+        for column, term in zip(geno_cols, geno_terms)
     )
     out["StdErr"] = ";".join(
-        f"{term.split('_')[1]}={alt.bse[term]:.12g}" for term in geno_terms
+        f"{labels.get(column, column.removeprefix('G_'))}={alt.bse[term]:.12g}"
+        for column, term in zip(geno_cols, geno_terms)
     )
 
     # if present:
