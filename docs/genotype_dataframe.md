@@ -62,13 +62,6 @@ rejected. Dosages use PLINK's diploid 0–2 scale.
 | `R2_minimum` | `float` | `0.5` | Retain R² strictly greater than this cutoff when a score source is supplied. |
 | `dosage_allele` | `str` or `None` | `None` | `"alt"`, `"ref"` or RAW-only `"counted"`. `None` counts ALT for binary input and the header allele for RAW. Explicit RAW REF/ALT requests require PVAR. |
 
-Variant selection happens **before binary dosage decoding**. For RAW it restricts
-the genotype columns loaded numerically, while the text file is still scanned.
-RAW selection uses variant IDs without their final `_COUNTED_ALLELE` suffix.
-For example, a RAW column `chr7_37338247_T_C_C` is selected with
-`variants=["chr7_37338247_T_C"]`. No genomic regions, patterns or automatic
-frequency filters are applied by `variants`.
-
 ### Optional imputation R² filtering
 
 ```python
@@ -114,6 +107,4 @@ results = hp.interaction(
 `hapy` aligns the partner matrix to phenotype sample IDs; missing required values
 are handled by the existing interaction analysis complete-case processing.
 
-The returned DataFrame is dense. For large filesets, select the partner variants
-before decoding to limit memory use. Apply imputation quality and other desired
-QC filters upstream; this reader performs no automatic QC filtering.
+For large genotype files, use `variants=[...]` to select specific variants and reduce memory usage. Apply imputation quality and other QC filters beforehand, as `read_genotype()` does not perform automatic QC filtering.

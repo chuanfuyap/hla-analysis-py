@@ -17,36 +17,15 @@ Both of them returns `(fig, ax)`.
 
 ## Input and significance
 
-An ID such as `AA_DRB1_11_32552129` is parsed into gene DRB1, **amino acid sequence position 11**, 
-and **genomic coordinate 32552129**. Plots default to numeric amino acid sequence positions within one gene. Select
-`genes="DRB1"`, for example. Use `x_axis="genomic"` for physical genomic spacing
-across multiple genes. IDs are case-normalised for gene matching. No genome
-assembly or coordinate conversion is inferred; `reference_build="GRCh38"` adds a
-label only. Coordinates must all use the same reference build supplied by you.
+## Input and significance
 
-Only position-level tests are accepted. An exon annotation in a position ID is
-accepted, including mapped IDs such as `AA_DRB1_80_32584153_exon2`. Residue suffixes are rejected because
-a residue test cannot be assumed to represent an omnibus position test. Duplicate
-rows for a position raise an error. Obtain position-level tests from the amino acid association
-analysis; this module never combines residue P-values. Different genomic coordinates
-are preserved even if their gene and sequence position are the same. Explicit
-`NA` coordinates are supported for sequence-position plots; genomic layouts
-require validated coordinates. Mapped insertions use labels such as `52i1`;
-sequence plots place these between flanking positions and print an INFO note
-that this is display spacing, not a fractional sequence distance.
+Both plotting functions accept amino acid position-level association results. Variant IDs such as `AA_DRB1_11_32552129` identify the HLA gene, amino acid position and genomic coordinate. Residue-level results (`OVR`) should be excluded before plotting.
 
-For current standard AA and AA omnibus interaction results, explicitly select
-`pval_col="P-value"` and `variant_col="VARIANT"`. Pairwise interaction results also use `P-value`, but represent individual
-encoded-column tests rather than AA block omnibus tests. Alternatively, supply `log10p_col="META_log10P"`, meaning **positive
-−log₁₀(P)**, not log₁₀(P). No test columns are silently mixed by the plotting
-functions.
+Use `variant_col="VARIANT"` and either `pval_col="P-value"` for association results or `log10p_col="META_log10P"` for meta-analysis results.
 
-Raw P-values must satisfy `0 < P <= 1`. Strings or Decimal values such as
-`"6.09e-412"` are accepted without underflow. A p-value reported as zero may represent an extremely small
-non-zero probability that falls below the smallest representable floating-point value: supply a finite −log₁₀(P) instead. 
-Labels derive the scientific notation  and exponent directly from the log value; they do not exponentiate
-the entire tiny probability. `p_digits=3` controls displayed significant figures.
-Accuracy is limited by the precision of the input. P=1 is valid and visible.
+Very small P-values (e.g. `6.09e-412`) can be supplied as strings to avoid numerical underflow. Alternatively, use `log10p_col` with precomputed −log₁₀(P) values.
+
+Genomic coordinates must use a consistent reference build. `reference_build` adds a genome-build label but does not convert coordinates.
 
 ## Choosing the X-axis
 
@@ -80,12 +59,7 @@ x_axis="equally_spaced"
 
 ![HLA association plotted using equally spaced positions](images/manhattan_equallyspaced.png)
 
-`equally_spaced` prints an INFO note on each call explaining that distances are
-not represented. In interaction plots, the partner Y-axis remains genomic in all
-three modes. `position_unit="Mb"` formats genomic axes only; it does not scale
-amino acid sequence positions or equally spaced indices. Changing the axis never
-combines P-values or merges distinct genomic records.
-
+For interaction plots, the partner Y-axis always represents genomic coordinates. Use `position_unit="Mb"` to display genomic coordinates in megabases. The `equally_spaced` option is intended for visual comparison and does not represent physical distances.
 
 ## Association plot
 
@@ -97,7 +71,7 @@ import hapy as hp
 
 association = pd.read_csv("examples/visualisation/association.csv")
 fig, ax = hp.vis.plot_aa_association(
-    association, x_axis="genomic", variant_col="VARIANT", log10p_col="META_log10P",
+    association, x_axis="equally_spaced", variant_col="VARIANT", log10p_col="META_log10P",
     highlight_top=True, annotate_p=True, position_unit="Mb",
     title="HLA amino acid position association",
     significance_threshold=5e-8, save_path="association.png",
@@ -144,32 +118,13 @@ for kind in ["scatter3d", "heatmap"]:
     )
 ```
 
-X is the HLA position's genomic coordinate; Y is the partner genomic coordinate.
-The 3D Z-axis and all point colours are −log₁₀(P). Annotation labels include the
-HLA gene, sequence position, partner information, and actual P-value.
-`partner_variant_col` can be parsed without an explicit position column for IDs
-such as `chr7:38175678`, `chr7_38175678_A_G`, or `SNP_A_7_38175678_exon1`.
-rsIDs need `partner_pos_col`. When both sources provide coordinates, disagreements
-are rejected. `partner_chrom="7"` supplies a chromosome label when only numeric
-positions are available; chromosomes are otherwise derived only from partner IDs.
-Coordinates spanning multiple partner chromosomes are rejected: filter to one
-chromosome per plot to avoid overlaying unrelated chromosome axes.
+The X-axis represents HLA amino acid positions, while the Y-axis represents partner genomic coordinates. In 3D plots, height and colour represent −log₁₀(P).
 
-Heatmaps are **sparse point heatmaps**: squares centred on exact observed coordinate
-pairs. They do not form a raster, interpolate missing combinations, or assume equal
-spacing. 
-- Background (`missing_color`) indicates unobserved combinations; observed non-significant values remain coloured. Point size is in display units, not genomic bin width. 
-- Reduce `marker_size` or zoom in if nearby observations overlap. 
-- There is no binning performed. 
-- `annotate_cells=True` labels every observed point; otherwise only highlighted points are labelled.
+Partner coordinates can be extracted from variant IDs such as `chr7:38175678`, or supplied using `partner_pos_col`. For rsIDs, genomic coordinates must be provided separately. Each interaction plot supports one partner chromosome.
 
-Repeated coordinate pairs are preserved by default (`duplicate="keep"`). Distinct
-partner variants can share a genomic coordinate. In 3D they retain their individual
-significance heights. In the heatmap all points remain, with a warning that one
-point can cover another; coordinates are never shifted. Filter specific variants
-for an unambiguous 2D view. Explicit `duplicate="error"` rejects repeats, while
-`duplicate="max"` warns and selects the largest −log₁₀(P) per pair (ties keep the
-first input row). This optional visual aggregation does not combine P-values.
+Heatmaps display observed interaction pairs as coloured squares without interpolating missing values. Use `marker_size` to adjust their appearance and `annotate_cells=True` to label individual points.
+
+Repeated coordinates are retained by default (`duplicate="keep"`). Alternatively, use `duplicate="error"` to reject duplicates or `duplicate="max"` to display the strongest association at each coordinate pair. This does not combine P-values.
 
 ## Plot input parameters
 
@@ -223,13 +178,7 @@ must follow the requirements above.
 
 ## Annotations and styling
 
-`annotate_p=False` highlights without default labels. `annotations` can be a mapping
-from highlight tuples (or position IDs) to custom text, or a callable receiving a
-copy of the parsed row (`id`, `gene`, `aa_pos`, `x`, `score`, and interaction `y` /
-`partner_label`). A callable can return None to omit a label. Custom text replaces
-the entire default label. Labels use heuristic screen-space placement, with explicit offsets available for
-fine adjustments. `annotation_offsets` maps highlight keys to `(dx, dy)` offsets in
-points; use it for dense figures. 3D labels are reprojected on every draw/view change.
+Use `annotate_p=False` to highlight positions without automatic labels. Custom labels can be supplied through `annotations` using a mapping or callable function. `annotation_offsets` allows manual adjustment of label positions, particularly for crowded figures.
 
 Shared styling keywords (passed directly to either plotting function):
 
@@ -289,12 +238,9 @@ Shared styling keywords (passed directly to either plotting function):
 | `show` | `bool` | `False` | Display the figure after creation. |
 | `p_digits` | `int` | `3` | Significant figures in formatted P-value labels. |
 
-`ax=` accepts an existing 2D axes for association/heatmap, or a 3D axes for scatter3d.
-With existing axes, their figure size/layout is retained; `figsize` applies only to
-new figures. All functions return the same figure and axes for further editing.
-No global Matplotlib style/backend is changed. For vector publication output leave
-`rasterized=False` and save PDF/SVG; PNG resolution uses `dpi`. Save directories must
-already exist. Figures remain open for the caller to modify or close.
+Both plotting functions return `(fig, ax)` for further customisation using Matplotlib. Existing axes can also be supplied through `ax`.
+
+Figures can be saved as PNG, PDF or SVG using `save_path`. Use PDF or SVG for vector graphics, or adjust `dpi` for raster image resolution.
 
 ## Reproduce examples and checks
 
