@@ -105,25 +105,17 @@ pairwise = hp.stats.interaction(
 
 ### `mode="one_vs_block_omnibus"`
 
-`"AA"` must be selected on at least one side: `kind="AA"` or `partner_kind="AA"`.
-If both sides are AA, the current runner treats the partner-side position as
-the omnibus block and tests it against each focal encoded column.
+Tests interactions between individual predictors and an AA position using an omnibus likelihood-ratio test. At least one side must be kind="AA" or partner_kind="AA". For AA–AA interactions, the partner position is treated as the omnibus block.
 
-```text
-Null model: Y ~ baseline covariates + partner + AA block
-Full model: Y ~ baseline covariates + partner + AA block
-               + partner:AA_column_1 + partner:AA_column_2 + ...
+```
+Null model: Y ~ covariates + partner + AA block
+Full model: Y ~ covariates + partner + AA block
+              + partner:AA_column_1 + partner:AA_column_2 + ...
 ```
 
-The likelihood-ratio test compares the full and null models on the same
-complete-case samples. `P-value` tests the interaction terms jointly; it does not
-test the AA or partner main effect. A one-column AA block is also eligible.
+The P-value tests the joint significance of interaction terms, rather than their individual main effects. Biallelic AA positions are also supported.
 
-
-Keep predictor names distinct from baseline covariate names. Pairwise mode
-handles identical names on the two interacting sides internally. For omnibus
-AA–AA tests, overlapping encoded names can still collide: selecting different
-position IDs alone does not guarantee distinct model-column names.
+Ensure predictor column names do not overlap with covariates or other genotype columns.
 
 ## `interaction()` parameters
 
@@ -342,8 +334,7 @@ filtered = hp.stats.interaction(
 
 ## Conditional interaction analysis
 
-`condition_on` adjusts for variants from the HLA block selected by `kind`,
-matching the argument name used by standard association analysis.
+Use `condition_on` to adjust for selected HLA variants during interaction analysis.
 
 ```python
 conditional = hp.stats.interaction(
@@ -353,13 +344,9 @@ conditional = hp.stats.interaction(
 )
 ```
 
-Conditioning variant IDs must exist in the A block. Their eligible genotype
-columns enter as baseline adjustment terms, and tasks
-where the tested A variant is a conditioning variant are excluded. They are not
-additional interacting predictors. This option adjusts for HLA-side variants
-only; it does not automatically remove tasks where the same ID occurs on partner block.
-The current interaction runner omits conditioning blocks with no eligible
-columns, so a requested empty block does not contribute adjustment terms.
+The specified variants are included as additional covariates and excluded from interaction testing. Conditioning applies only to the focal (`kind`) block, not the partner (`partner_kind`) block.
+
+Variants without eligible genotype columns are not included in the adjustment.
 
 ## Reading the interaction results
 
@@ -471,7 +458,3 @@ results = hp.stats.interaction(
     y=phenotype, covar=covar, residue=True,
 )
 ```
-
-The existing model remains `Y ~ covariates + residue + partner + residue:partner`. The option requires `config.mode="pairwise"` and AA on at least one side; other modes raise `ValueError`. `condition_on`, variant/pair filtering and parallel execution remain available. Position-pair tasks keep related residue contrasts together within the existing workers. When all relevant genotype columns share a missingness pattern, their tests reuse one ABT; differing patterns retain per-combination complete-case filtering.
-
-For complementary biallelic dosages `D_B = 2 - D_A`, an eligible existing fit can be reused. Reversing the variant residue negates its main-effect coefficient and the interaction coefficient, and changes the partner main-effect coefficient to `old_partner_beta + 2 * old_interaction_beta`. The partner main-effect P-value is recalculated using the fitted covariance, rather than copied. Reversing the AA partner applies the corresponding transformation to the other main effect. Reversing both AA sides applies both transformations. Confidence intervals and signed interaction statistics are transformed consistently.

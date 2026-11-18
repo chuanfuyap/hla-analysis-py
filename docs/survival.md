@@ -11,16 +11,11 @@ To facilitate these analyses, `hapy` provides functions for survival analysis of
 HLA amino acid variation, enabling the investigation of associations between HLA 
 components and time-to-event outcomes.
 
-`hp.stats.survival()` runs Cox regression for the AA, HLA or SNP block of a loaded
-`HLAdata` object. `hp.survival()` is the same function. It returns a pandas
-DataFrame; results are not saved automatically.
+`hp.stats.survival()` performs Cox proportional hazards regression for AA, HLA or SNP data, using the [lifelines](https://lifelines.readthedocs.io/en/latest/) Python package. Both static and time-varying covariates are supported.
 
-The underlying Cox proportional hazards models are fitted using the [lifelines](https://lifelines.readthedocs.io/en/latest/) Python package, supporting both static and time-varying covariates.
+Time-varying covariates allow predictor values to change during follow-up, rather than modelling time-varying genetic effects.
 
-Without `dynamic_covar`, hapy uses `lifelines.CoxPHFitter`. Supplying time-varying
-covariates selects `lifelines.CoxTimeVaryingFitter` and constructs start–stop
-intervals internally. Covariate values can change over follow-up; this does not
-fit a separate time-varying regression coefficient.
+`hp.survival()` is an alias. Results are returned as a pandas DataFrame and are not saved automatically.
 
 ## Endpoint and sample tables
 
@@ -114,15 +109,9 @@ sample_id	time	treatment
 003	3	0
 ```
 
-For subject 001, treatment is zero from time 0 to 4 and one thereafter until the
-endpoint. Subject 002 keeps its baseline value throughout follow-up. The rows
-contain the current covariate state, not increments to accumulate.
+For subject 001, treatment changes from 0 to 1 at time 4. Covariate values remain unchanged until the next recorded update.
 
-Every analysed subject must have a row at time zero with non-missing values for
-all dynamic covariates. A subject missing any required baseline dynamic value
-is excluded in its entirety. Later missing update cells mean no change to that
-covariate; its previous value carries forward. Updates at or after the subject's
-endpoint are ignored. Change times must be finite and nonnegative.
+Each subject must have an initial record at time zero. Missing initial values exclude the subject, while missing values in later updates retain their previous values. Updates at or after the endpoint are ignored.
 
 Load the full update table for your cohort and pass it to the same API:
 
@@ -146,26 +135,16 @@ Use distinct names for dynamic covariates, baseline covariates and genotype
 predictors. Predictor names cannot use the reserved structural names
 `sample_id`, `time`, `event`, `start` or `stop`.
 
-hapy constructs intervals with `start < t <= stop`. The event indicator is set
-only on the final interval for an observed event. The endpoint table still has
-one row per subject; do not supply repeated events or preconstructed start–stop
-rows through `event_time`.
+`hapy` automatically constructs the intervals required for time-varying Cox regression. The endpoint table must still contain one row per subject.
 
-## What is tested?
+## ## What is tested?
 
-The genotype adapter determines the eligible genotype columns for each variant
-or position, using its existing QC and reference selection.
+`hapy` performs two types of Cox association tests:
 
-- **One genotype column:** fit a covariate-adjusted Cox model and report the
-  coefficient's Wald P-value and hazard ratio.
-- **Multiple genotype columns:** compare the full model containing all genotype
-  terms with a null model containing the same baseline and dynamic covariates.
-  Report the omnibus partial-likelihood-ratio P-value for the genotype block.
+- **Single genotype column:** Uses a Wald test, reporting the hazard ratio (HR) and P-value.
+- **Multiple genotype columns:** Uses an omnibus likelihood-ratio test, comparing models with and without the genotype terms.
 
-Both models in an omnibus comparison use the same subjects and survival
-observations. Compatible null summaries can be reused across positions; differing survival
-observations or baseline designs trigger a local null fit. This optimisation
-does not change the test or complete-case rules.
+Both tests adjust for the specified covariates and use the existing genotype QC and reference selection.
 
 ## Samples and missing information
 
@@ -197,21 +176,11 @@ genotype missingness.
 | `AA_AF` | AA frequency annotation from genotype preparation. Unlike standard association and interaction outputs, the current survival runner does not recompute this field after final survival complete-case filtering. |
 | `INFO` | Last column; missing when explicit checks pass, otherwise a fit/skip reason. |
 
-`HR`, `StdErr` and CI fields remain missing for omnibus tests. The direction of
-a one-column effect follows the genotype dosage encoding. All tests are
-covariate-adjusted associations; a fitted hazard ratio is not a survival
-probability.
+Hazard ratios and confidence intervals are reported for single-column tests, while omnibus tests report a joint association P-value. A hazard ratio describes relative event risk over time, not survival probability.
 
-Possible `INFO` values include `insufficient variation`, `no complete-case
-samples`, `no observed events`, `not converged`, `singular matrix`, `numerical
-fitting error`, non-finite coefficients/standard errors/log-likelihood and
-`feature not estimated`. Omnibus fit messages identify the null or full model.
-Failed checks leave statistical estimates missing.
+`INFO` reports reasons for failed or excluded tests, such as insufficient variation or model convergence issues. Failed tests have missing statistical estimates.
 
-Lifelines warnings are not suppressed or automatically copied into `INFO`.
-A missing `INFO` value means the implemented checks passed; proportional-hazards
-assumptions and other model diagnostics are not checked automatically by this
-API. Unexpected input or fitting exceptions can still stop the run.
+**Note:** `hapy` does not automatically assess the proportional hazards assumption. Users should check model assumptions and diagnostics where appropriate.
 
 ## API and execution options
 

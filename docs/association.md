@@ -17,8 +17,6 @@ not saved automatically.
 
 The underlying linear and logistic regression models are fitted using the [statsmodels](https://www.statsmodels.org/stable/index.html) Python package, supporting both single-variant association tests and multi-allelic omnibus tests.
 
-Omnibus tests reuse compatible baseline null models. Different complete-case samples or baseline designs trigger a local null fit.
-
 This page focuses on amino acid position tests with `kind="AA"`. Input rows can
 represent individual residues or residue encodings, but `hapy` groups them into
 positions before testing. A position such as `AA_DRB1_11_32552129` represents
@@ -204,18 +202,18 @@ results. Entirely missing columns and some zero-valued housekeeping columns may 
 
 | Column | Meaning |
 |---|---|
-| `VARIANT`, `GENE`, `AA_POS` | Position-level identifier, gene and amino acid sequence position. |
-| `P-value` | P-value of either omnibus test or univariate amino acid position test. |
-| `TEST` | **MULTI**: omnibus test across multiple genotype columns; **SINGLE**: one genotype-column association, typically a biallelic AA position; **OVR**: an additional individual residue one-vs-rest test, including the opposite residue at an eligible biallelic position. OVR is only generated when `residue=True` |
-| `Statistic`, `DoF` | Test statistic and associated degrees of freedom. MULTI tests report the likelihood-ratio statistic and its degrees of freedom. SINGLE and OVR tests report the t-statistic for linear regression or the Wald z-statistic for logistic regression; their DoF field is not populated. |
-| `Beta`, `StdErr` | Association effect estimate and standard error. MULTI tests report residue-specific estimates relative to the reference amino acid, formatted as `A=value;G=value`. SINGLE and OVR tests report scalar estimates; OVR compares the tested residue with all other residues. Logistic regression coefficients are on the log-odds scale (not odds ratios); apply `np.exp()` to each coefficient to obtain odds ratios. |
-| `CI-lower`, `CI-upper` | Lower and upper limits of the 95% confidence interval, reported for SINGLE and OVR tests. Their direction depends on the counted allele encoding. For logistic regression, apply `np.exp()` to these limits to obtain the 95% confidence interval for the odds ratio. |
-| `Ref_AA`, `Amino_Acids`, `AAcount` | For position-level tests, the reference amino acid omitted from the design, available residue labels and allele count reported by the AA adapter. OVR rows use `Ref_AA="tested: X"`; the comparator is all other residues. `Amino_Acids` retains the position's available labels. |
-| `AA_AF` | AA frequencies on the final modelling samples, formatted as `F=0.2;S=0.8`. OVR rows report the tested residue frequency. Retained reference dosages are used where available; frequencies are not reconstructed from QC-filtered columns. |
-| `HLA_AF`, `MAF` | HLA allele frequency or SNP minor allele frequency on the final modelling samples for single-column HLA/SNP tests. |
-| `N_used`, `N_case`, `N_control` | Final number of complete-case modelling samples and, for binary outcomes, the case and control counts. Counts can differ by position or OVR test because of missing data. |
-| `INFO` | Blank or missing for successful tests. `insufficient variation` identifies AA positions with no eligible genotype columns after sample subsetting and allele-frequency processing. Fit diagnostics can instead report `not converged`, `non-finite coefficients`, `non-finite standard errors` or `non-finite log-likelihood`. MULTI diagnostics identify the null or full model. Failed checks leave test estimates missing. |
-| `COND_KIND`, `COND_VARIANTS`, `N_COND_VARIANTS` | Selected block kind, semicolon-separated conditioning variant IDs and number of conditioning variants. Present when applicable. |
+| `VARIANT`, `GENE`, `AA_POS` | Variant identifier, HLA gene and amino acid position. |
+| `P-value` | Association P-value. |
+| `TEST` | `SINGLE`: single-residue test; `MULTI`: position-level omnibus test; `OVR`: residue one-vs-rest test. |
+| `Statistic`, `DoF` | Test statistic and degrees of freedom. `MULTI` reports a likelihood-ratio statistic; `SINGLE` and `OVR` report a t-statistic (linear) or Wald z-statistic (logistic). |
+| `Beta`, `StdErr` | Effect estimate and standard error. `MULTI` reports residue-specific effects relative to the reference (`A=value;G=value`), while `SINGLE` and `OVR` report individual effects. Logistic coefficients are log-odds; use `np.exp()` to obtain odds ratios. |
+| `CI-lower`, `CI-upper` | 95% confidence interval for `SINGLE` and `OVR` tests. |
+| `Ref_AA`, `Amino_Acids`, `AAcount` | Reference amino acid, available residues and allele count. For OVR tests, `Ref_AA` identifies the tested residue rather than a reference. |
+| `AA_AF` | Amino acid frequencies in the analysed samples (`F=0.2;S=0.8`). OVR reports the tested residue frequency. |
+| `HLA_AF`, `MAF` | HLA allele frequency or SNP minor allele frequency, where applicable. |
+| `N_used`, `N_case`, `N_control` | Number of samples analysed and case/control counts for binary outcomes. |
+| `INFO` | Diagnostic information for excluded or failed tests, such as insufficient variation or model convergence issues. |
+| `COND_KIND`, `COND_VARIANTS`, `N_COND_VARIANTS` | Conditioning type, variant identifiers and number of conditioning variants, where applicable. |
 
 Unexpected fitting exceptions can still stop analysis; `INFO` records the
 explicit checks described above.
@@ -275,11 +273,6 @@ These filters select variants to test; they do not change the loaded genotype
 object or apply an additional frequency threshold. Gene filters need gene
 annotations and are primarily useful for AA/HLA blocks.
 
-In `analyse()`, filtering occurs before genotype construction with an empty
-`geno_cols` list, then again for retained tested variants after construction.
-Use stable ID/gene rules for selection, rather than relying on genotype columns
-being available or on a callback being called exactly once.
-
 ## Parallel execution
 
 For parallel execution in Jupyter notebooks, use threads:
@@ -310,7 +303,7 @@ P-value remains a joint test, even when individual coefficients are exported.
 
 ## Optional residue one-vs-rest tests
 
-Use `residue=True` with `hp.stats.analyse()` and `kind="AA"` to append residue tests to the existing position-level results.
+Use residue=True with hp.stats.analyse() and kind="AA" to perform individual residue association tests alongside the standard position-level tests.
 
 ```python
 results = hp.stats.analyse(
@@ -321,18 +314,11 @@ position_results = results[results["TEST"].isin(["SINGLE", "MULTI"])]
 residue_results = results[results["TEST"] == "OVR"]
 ```
 
-At a multiallelic position, the existing `MULTI` row is retained. Each QC-passing 
-residue then gets a separate `Y ~ covariates + residue_dosage` test through the 
-existing univariate model. The comparison is that residue versus all other residues; 
-it is not a comparison against only `Ref_AA`.
+For multiallelic positions, the original omnibus (MULTI) result is retained, with an additional one-vs-rest (OVR) test for each QC-passing residue. Each OVR test compares the tested residue against all other residues.
 
-For biallelic positions, the existing `SINGLE` row already tests one residue, 
-so only the opposite residue is appended. Additional OVR rows use `Ref_AA="tested: S"` 
-to identify the tested residue, without a reference label. When the dosages sum to two 
-on the same model samples and the fitted model has a supported full-rank intercept design, 
-the opposite result is inferred without another fit. Beta and the signed statistic 
-change sign; the confidence interval becomes `[-old_upper, -old_lower]`. P-value, 
-standard error and sample counts are retained. Otherwise, the opposite dosage is fitted explicitly.
+For biallelic positions, the existing SINGLE test already evaluates one residue, so only the opposite residue is added as an OVR result.
+
+OVR rows use Ref_AA="tested: S" to identify the tested residue.
 
 ## Position-based stepwise conditional analysis
 
@@ -356,7 +342,7 @@ winners = hp.stats.stepwise(
 )
 ```
 
-The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans. Motif-based selection is not currently supported.
+The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans.
 
 Output
 
@@ -384,3 +370,50 @@ continued = hp.stats.stepwise(
 ```
 
 This starts a new stepwise analysis conditional on all previously selected positions.
+### Stepwise motif (haplotype) selection
+
+```python
+res = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    reference=reference,
+    selection="motif",  # "haplotype" is an alias
+    significance_threshold=5e-6,
+    max_steps=20,
+    verbose=True,
+)
+```
+
+**Motif selection begins with a standard AA position scan.** Subsequent scans test remaining positions within the selected gene by comparing existing motifs against expanded motifs using a likelihood-ratio test, following [Sakaue et al. (2023)](https://doi.org/10.1038/s41596-023-00853-4). The process continues until no additional position meets the significance threshold.
+
+**Two motif-building methods are supported:**
+
+- `aa_motif_dosages()`: Uses the allele mapping from `map_hla_alleles()`. No reference argument is required.
+- `hla_dosage_to_motifs()`: Uses an `HLAReference` and HLA allele dosages, including fractional dosages. For AA-only objects, provide the original allele dosages through `hla_dosages`.
+
+**Output**
+
+Returns a pandas DataFrame containing the most significant position from each scan, including the final nonsignificant result. Additional columns report selected positions and the number of motif groups tested. Subsequent motif tests use `TEST="MOTIF"`.
+
+Metadata, including selected positions, gene, stopping reason and runtime, is available in `res.attrs`.
+
+**Continue from previous results**
+
+```python
+continued = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    reference=reference,
+    selection="motif",
+    condition_on=res.attrs["condition_on"],
+    significance_threshold=1e-5,
+)
+```
+
+This resumes selection using previously selected positions as the initial motif model. Position-based selection remains the default.

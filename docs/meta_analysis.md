@@ -30,20 +30,19 @@ ivw, stouffer = hp.meta.meta_analyse("studies.txt", data_type="AA")
 
 ## AA position routing
 
-The reader checks test labels across all cohorts before selecting the meta-analysis method for each position.
+For amino acid positions, `hapy` automatically selects the meta-analysis method based on the tests reported across cohorts:
 
-| Tests found for a position | Method |
-| --- | --- |
-| All position-level rows are `SINGLE` | Inverse-variance meta-analysis of scalar `Beta` and `StdErr`. |
-| Any position-level row is `MULTI` | Weighted Stouffer using every available `SINGLE` or `MULTI` P-value at that position. |
+| Tests across cohorts | Method |
+|---|---|
+| All `SINGLE` | Inverse-variance weighting (IVW) of effect estimates. |
+| Any `MULTI` | Weighted Stouffer's method combining `SINGLE` and `MULTI` P-values. |
 | `OVR` | Excluded from position-level meta-analysis. |
-| Missing test label | Omitted, including unlabelled skipped rows. |
 
-For example, if a position is `SINGLE` in studies A and B and `MULTI` in study C, all three available position-level P-values contribute to one Stouffer result. The position is excluded from IVW. The combined result describes evidence for association at the position, rather than a common residue coefficient.
+For example, if a position is `SINGLE` in two cohorts and `MULTI` in another, all three P-values are combined using Stouffer's method. This tests overall association at the position rather than a common residue effect.
 
-A row labelled `MULTI` still determines routing when its P-value is missing, but that row does not contribute to the combined statistic, study count or sample totals. Missing IVW coefficients or standard errors are also omitted. Duplicate position-level rows within a cohort raise an error after OVR and unlabelled rows are excluded; the reader does not choose one or count them as independent cohorts.
+Only valid results contribute to the meta-analysis. Missing P-values or effect estimates are excluded, and duplicate position-level results within a cohort are not permitted. A `MULTI` result still determines the method even when its P-value is missing.
 
-For IVW, effect encodings must describe the same contrast across cohorts. The reader does not realign residues or counted alleles. Cohorts must be independent.
+For IVW, effect estimates must represent the same allele or residue contrast across cohorts, as `hapy` does not automatically align them. Cohorts must be independent.
 
 ## Custom column names and delimiters
 
@@ -87,14 +86,20 @@ Use the same column mapping and delimiter for all cohort tables in a call. `sep=
 
 Optional count columns may be absent. Set a count parameter to `None` to disable it. The selected counts are mapped internally to the weighting fields; unrelated existing count columns do not override that selection.
 
-## Weights and outputs
+## ## Weights and outputs
 
-- IVW uses inverse squared standard errors and reports a combined coefficient, standard error and two-sided P-value.
-- Stouffer uses `z = norm.isf(P)` and sample-size weights. Valid positive case/control counts use `sqrt(N_eff)`, where `N_eff = 4 / (1/N_case + 1/N_control)`. Otherwise, a positive selected sample count uses `sqrt(N_used)`. Without usable counts, the weight is one.
+- **Inverse-variance weighting (IVW):** Combines effect estimates using inverse-variance weights (`1/SE²`), reporting a combined coefficient, standard error and two-sided P-value.
+- **Stouffer's method:** Combines P-values using [`scipy.stats.combine_pvalues()`](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.combine_pvalues.html) with sample-size weights. P-values are transformed into Z-scores using `norm.isf(P)`, without incorporating effect direction.
 
-Stouffer combines evidence without imposing a residue effect direction. Its transform accepts valid cohort P-values from both SINGLE and MULTI position tests; it does not divide them by two. Weights should be independent of the observed P-values. `hapy` currently uses [scipy's implementation](https://docs.scipy.org/doc/scipy/reference/generated/scipy.stats.combine_pvalues.html)
+For Stouffer's method, weights are calculated as:
 
-Both outputs include `N studies` and available cohort totals. `Total N` sums the selected modelling sample counts for contributing rows. Totals are missing when a contributing cohort lacks the corresponding count, rather than reporting a partial sum as complete. Combined `META_log10P` is minus log10(P) and remains available when the combined floating-point P-value underflows. Exact zero input P-values remain unsupported.
+- **Case-control studies:** `sqrt(N_eff)`, where `N_eff = 4 / (1/N_case + 1/N_control)`.
+- **Other studies:** `sqrt(N_used)`.
+- **Missing sample counts:** Equal weight (`1`).
+
+Both methods report the number of contributing studies (`N studies`), available sample totals (`Total N`) and combined P-values. Sample totals are reported as missing if counts are unavailable for any contributing cohort.
+
+`META_log10P` reports `-log10(P)`, retaining very small P-values that may otherwise underflow to zero.
 
 ## Interaction tables
 

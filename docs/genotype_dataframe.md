@@ -57,6 +57,9 @@ rejected. Dosages use PLINK's diploid 0–2 scale.
 | `pvarfileloc` | `str`, `pathlib.Path` or `None` | `None` | PVAR path for PGEN or RAW. `None` uses `<prefix>.pvar` when available; PGEN requires it, RAW does not. Not used for bfile. |
 | `psamfileloc` | `str`, `pathlib.Path` or `None` | `None` | PGEN-only PSAM path. `None` uses `<prefix>.psam`. |
 | `variants` | `str`, iterable of `str` or `None` | `None` | Exact variant IDs in requested order. `None` reads all variants; `[]` returns samples with no genotype columns. Unknown or repeated IDs raise an error. |
+| `pvar_R2_column` | `str` or `None` | `None` | PVAR INFO key or column containing imputation R². Requires PVAR; not available for bfile. |
+| `filter_R2` | `str`, `pathlib.Path`, `pandas.DataFrame` or `None` | `None` | Headerless variant-ID/R² file, or a variant-indexed DataFrame with scores in integer column `1`. Available for all formats. |
+| `R2_minimum` | `float` | `0.5` | Retain R² strictly greater than this cutoff when a score source is supplied. |
 | `dosage_allele` | `str` or `None` | `None` | `"alt"`, `"ref"` or RAW-only `"counted"`. `None` counts ALT for binary input and the header allele for RAW. Explicit RAW REF/ALT requests require PVAR. |
 
 Variant selection happens **before binary dosage decoding**. For RAW it restricts
@@ -65,6 +68,25 @@ RAW selection uses variant IDs without their final `_COUNTED_ALLELE` suffix.
 For example, a RAW column `chr7_37338247_T_C_C` is selected with
 `variants=["chr7_37338247_T_C"]`. No genomic regions, patterns or automatic
 frequency filters are applied by `variants`.
+
+### Optional imputation R² filtering
+
+```python
+# Read R² from the PVAR INFO field (use the key in your file, e.g. DR2 or R2).
+partners = hp.read_genotype(
+    "test_data/chr7", pvar_R2_column="DR2", R2_minimum=0.8,
+)
+
+# Alternatively, supply a two-column, headerless variant-ID/R² file.
+partners = hp.read_genotype(
+    "test_data/chr7.bed", format="bfile",
+    filter_R2="test_data/chr7.r2", R2_minimum=0.8,
+)
+```
+
+Use either `pvar_R2_column` or `filter_R2`, not both. Filtering is disabled
+unless a score source is supplied; setting `R2_minimum` alone does not enable it.
+
 
 ## Using the DataFrame in interactions
 

@@ -316,36 +316,13 @@ Mapping issues can be inspected using `hladat.hla_mapping.issues`.
 
 ## Ambiguous amino acids and alignment gaps
 
-When resolving a lower-resolution call against several reference sequences,
-missing states are ignored if known states are available:
+At two-field HLA allele resolution, amino acid sequences are generally consistent across matching reference alleles. Differences mainly arise from incomplete sequences (*) and alignment gaps (.).
 
-| Matching states | Mapped state | Interpretation |
-|---|---|---|
-| `M, M` | `M` | Confirmed agreement. |
-| `M, *` | `M` | Inferred from the known sequence. |
-| `M, V` | `?` | Conflicting residues; unassigned. |
-| `M, V, *` | `?` | Conflicting residues with incomplete sequence; unassigned. |
-| `*, *` | `?` | No known sequence; unassigned. |
-| `., .` | `.` | Confirmed alignment gap. |
-| `., P` | `.P` | P or a gap; one combined category. |
-| `., P, *` | `.P` | P or a gap, with incomplete sequence. |
-| `., M, V` | `?` | Multiple distinct residues; unassigned. |
+- * (missing sequence): If a known residue is available from another matching allele, that residue is used. Otherwise, the position remains unresolved (?).
+- . (alignment gap): Represents the absence of an amino acid at that alignment position. Unlike *, this is a known state.
+- Combined states (e.g. .P): When matching alleles contain either a gap or a residue, both possibilities are retained as a single category.
 
-`*` denotes unavailable sequence. `.` is an alignment gap, representing the
-absence of a residue at that column, including insertion/deletion differences.
-For example, `226i1` identifies the first insertion column after position 226.
-A gap is a known state, not missing sequence.
-
-A combined label such as `.P` does not assign its dosage to P or to the gap
-separately. A specific full-resolution allele maps to its own state. Inferred
-positions and alternatives are recorded in `reference.metadata["inferred_positions"]`
-and `reference.metadata["ambiguous_positions"]`.
-
-`?` is not emitted as an AA category. Fractional AA mapping retains contributions
-from assignable alleles when another contribution is unknown, and reports the
-unmapped amount and partial/missing counts in
-`aa.conversion_metadata["resolution"]`. A sample-position with only unresolved
-positive contributions remains missing.
+Unresolved positions (?) are not assigned an amino acid dosage. For fractional dosage mapping, contributions from known alleles are retained, while unresolved contributions are reported in aa.conversion_metadata["resolution"].
 
 ## Phased amino acid motifs
 
@@ -365,11 +342,8 @@ calculates their **dosages (0, 1 or 2)** for each sample. Alleles sharing the sa
 Confirmed motif contributions are retained when the other allele cannot be
 mapped. Samples with no usable motif assignment remain missing.
 
-Motif assignments are cached for efficient reuse. The function accepts mapped `HLAdata` objects 
-or amino acid dosage DataFrames with preserved mapping information.
-
 **Note:** Phasing is preserved within each HLA gene, but not between genes. This function 
-constructs motifs only; it does not perform conditional association analysis.
+constructs motifs only; use `hp.stats.stepwise(selection="motif", ...)` for conditional haplotype association analysis (see [association analysis](association.md#stepwise-motif-haplotype-selection)).
 
 ## Parameters
 
