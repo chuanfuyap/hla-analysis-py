@@ -333,3 +333,54 @@ on the same model samples and the fitted model has a supported full-rank interce
 the opposite result is inferred without another fit. Beta and the signed statistic 
 change sign; the confidence interval becomes `[-old_upper, -old_lower]`. P-value, 
 standard error and sample counts are retained. Otherwise, the opposite dosage is fitted explicitly.
+
+## Position-based stepwise conditional analysis
+
+hp.stats.stepwise() performs stepwise conditional association analysis of amino acid positions. It identifies the most significant position, adds it to the conditioning list, and repeats the analysis until no further positions meet the significance threshold.
+
+```python
+winners = hp.stats.stepwise(
+    hladat=hladat,
+    config=cfg,                 # StandardConfig: linear or logit
+    kind="AA",
+    selection="position",
+    y=pheno[2],                 # IID-indexed Series, or supply famfile
+    covar=covar,
+    condition_on=None,          # optional initial full AA position IDs
+    significance_threshold=5e-6,
+    max_steps=20,
+    residue=False,
+    verbose=True,
+    use_progress_bar=False,
+    print_every=10,
+)
+```
+
+The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans. Motif-based selection is not currently supported.
+
+Output
+
+Returns a pandas DataFrame containing the most significant position from each scan, with additional columns:
+
+- STEP: Scan number.
+- SELECTED: Whether the position passed the significance threshold.
+
+The final non-significant result is retained but not added to the conditioning list.
+
+The selected positions, stopping reason, total runtime and other metadata are available through res.attrs.
+
+### Continue from previous results
+
+```python
+continued = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    condition_on=res.attrs["condition_on"],
+    significance_threshold=1e-5,
+)
+```
+
+This starts a new stepwise analysis conditional on all previously selected positions.

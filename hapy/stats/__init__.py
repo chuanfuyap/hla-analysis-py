@@ -10,11 +10,13 @@ This module exports configs and filter utilities.
 """
 
 from .api import analyse, analyse_many, interaction, survival
+from .stepwise import stepwise
 from .types import StandardConfig, InteractionConfig, SurvivalConfig
 from . import filters as filters
 
 __all__ = [
     "analyse",
+    "stepwise",
     "analyse_many",
     "interaction",
     "survival",

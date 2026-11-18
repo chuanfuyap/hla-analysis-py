@@ -125,6 +125,11 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     null_df = null.df_model
     lrstat = 2 * (alt.llf - null_llf)
     dof = alt.df_model - null_df
+    if dof <= 0:
+        return {"INFO": "no additional information after conditioning", "TEST": "MULTI"}
+    if lrstat < -1e-8:
+        return {"INFO": "full model likelihood below null model", "TEST": "MULTI"}
+    lrstat = max(0.0, lrstat)
     lrp = stats.chi2.sf(lrstat, dof)
     #fstat, fp = anova(nul, alt, abt["Y"], model_type)
 

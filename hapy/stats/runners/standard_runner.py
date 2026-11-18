@@ -17,6 +17,8 @@ from __future__ import annotations
 import re
 import time
 from functools import partial
+from patsy import dmatrix
+from ..models.common import categorical_term
 from collections.abc import Sequence
 
 import numpy as np
@@ -148,6 +150,9 @@ def _prepare_conditions(adapter, hladat, index, covdf, conditions):
             raise ValueError(f"Conditioning variant {variant!r} has no eligible genotype columns.")
         adjustment = adjustment.copy()
         adjustment.columns = [f'COND_{_safe_name(variant)}__{c}' for c in adjustment.columns]
+        if not adjustment.columns.is_unique or (covdf is not None and
+                not adjustment.columns.intersection(covdf.columns).empty):
+            raise ValueError(f"Conditioning column name collision for {variant!r}.")
         covdf = adjustment if covdf is None else pd.concat([covdf, adjustment], axis=1)
         covar_cols.extend(adjustment.columns)
     return covdf, covar_cols
@@ -247,6 +252,33 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
     return rows
 
 
+def _fit_stepwise_row(abt, qc, meta, variant_id, adapter, geno_cols,
+                      covar_cols, model_type, conditions, null_cache=None, aa_geno=None):
+    """Reject conditional aliases and retain recognised numerical failures as rows."""
+    failed = dict(meta, VARIANT=variant_id, **qc)
+    failed.update({"P-value": np.nan, "TEST": "SINGLE" if len(geno_cols) == 1 else "MULTI",
+                   "COND_KIND": adapter.KIND if conditions else np.nan,
+                   "COND_VARIANTS": ";".join(conditions) if conditions else np.nan,
+                   "N_COND_VARIANTS": len(conditions)})
+    if not geno_cols or abt.empty:
+        failed["INFO"] = "insufficient variation" if not geno_cols else "no complete-case samples"
+        return failed
+    try:
+        terms = [categorical_term(c, abt[c].dtype) for c in covar_cols]
+        # Construct the baseline with the same categorical encoding as the model.
+        baseline = np.asarray(dmatrix("1" + (" + " + " + ".join(terms) if terms else ""), abt))
+        full = np.column_stack([baseline, abt[geno_cols].to_numpy(dtype=float)])
+        if np.linalg.matrix_rank(full) <= np.linalg.matrix_rank(baseline):
+            failed["INFO"] = "no additional information after conditioning"
+            return failed
+        return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
+            covar_cols, model_type, conditions, [], null_cache=null_cache, aa_geno=aa_geno)
+    except (PerfectSeparationError, np.linalg.LinAlgError, FloatingPointError, OverflowError,
+            ZeroDivisionError) as exc:
+        failed["INFO"] = f"numerical fit failure: {type(exc).__name__}: {exc}"
+        return failed
+
+
 def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
     try:
         adapter = state["adapter"]
@@ -286,6 +318,11 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
         if state.get("residue", False) and aa_geno is not None:
             ovr_source = pd.concat([build_model_predictors(aa_geno, covdf_local), yser.rename("Y")], axis=1)
 
+        if state.get("stepwise_scan", False):
+            return _fit_stepwise_row(abt, qc, meta, variant_id, adapter, geno_cols,
+                covar_cols_local, model_type, used_conditions,
+                null_cache=state.get("null_cache"), aa_geno=aa_geno)
+
         return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
                                  covar_cols_local, model_type, used_conditions, skipped_conditions,
                                  null_cache=state.get("null_cache"), aa_geno=aa_geno, residue=state.get("residue", False), ovr_source=ovr_source)
@@ -311,6 +348,8 @@ def run_standard(
     condition_on=None,
     *,
     residue: bool = False,
+    _stepwise_scan: int | None = None,
+    _stepwise_positions=None,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
@@ -326,7 +365,9 @@ def run_standard(
     _validate_conditioning_variants(adapter, hladat, condition_on_list)
 
     variant_ids = list(adapter.iter_variants(hladat))
-    if variant_filter is not None:
+    if _stepwise_positions is not None:
+        variant_ids = [v for v in variant_ids if v in _stepwise_positions]
+    if variant_filter is not None and _stepwise_scan is None:
         block = getattr(hladat, adapter.KIND)
         info_df = block.info
         filtered = []
@@ -351,7 +392,7 @@ def run_standard(
         condition_set = set(condition_on_list)
         variant_ids = [vid for vid in variant_ids if vid not in condition_set]
 
-    if verbose:
+    if verbose and _stepwise_scan is None:
         print("----------------", flush=True)
         print(f"STARTING ANALYSES on:\t{adapter.KIND}, model={config.model_type}", flush=True)
         print(f"VARIANTS SCHEDULED FOR ANALYSIS:\t{len(variant_ids)}", flush=True)
@@ -381,13 +422,14 @@ def run_standard(
         "condition_on_list": condition_on_list,
         "null_cache": null_cache,
         "residue": residue,
+        "stepwise_scan": _stepwise_scan is not None,
     }
 
 
     prog = (
         ProgressPrinter(
             total=len(variant_ids),
-            desc=f"standard[{adapter.KIND}]",
+            desc=f"Scan {_stepwise_scan}" if _stepwise_scan is not None else f"standard[{adapter.KIND}]",
             use_tqdm=use_progress_bar,
             print_every=print_every,
         )
@@ -421,7 +463,7 @@ def run_standard(
     if adapter.KIND == 'AA':
         out = _ensure_aa_output_info(out)
 
-    if verbose:
+    if verbose and _stepwise_scan is None:
         if adapter.KIND == 'AA':
             _report_aa_skips([out])
         print(f"standard[{adapter.KIND}] done in {format_seconds(time.perf_counter() - t0)}", flush=True)
