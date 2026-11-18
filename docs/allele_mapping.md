@@ -244,7 +244,9 @@ dosages = hp.map_hla_alleles(
 reloaded = hp.read_aa_dosage("aa_dosages.tsv")
 ```
 
-It uses the existing `HLAdata` construction and marker annotation without implicit QC. 
+It uses the existing `HLAdata` construction and marker annotation. By default,
+simple MAF filtering is applied to mapped output states; original allele calls and
+the full allele-pair mapping are preserved.
 
 Export writes both:
 
@@ -257,6 +259,21 @@ The dosage file can be loaded independently, but without the accompanying phase 
 the original allele calls and phase cannot be recovered, preventing motif construction.
 
 A DataFrame returned directly retains this information in dosages.attrs["hla_mapping"].
+
+## QC before and after mapping
+
+For dosage HLA-to-AA mapping, avoid applying `simpleQC` when loading the data. 
+Load the allele data with `simpleQC=False`: rare HLA alleles can
+carry common amino acids, so removing those alleles removes their contributions
+to the mapped AA dosages. Filtering input alleles on imputation quality can also
+leave an incomplete panel.
+
+Apply simple QC **after mapping**, to the AA states used for analysis. Both
+`map_hla_alleles()` and `hla_dosage_to_aa()` do this by default:
+
+```python
+aa = hp.hla_dosage_to_aa(allele_dosages, reference, simpleQC=True)
+```
 
 ## HLA allele resolution
 
@@ -280,8 +297,10 @@ For further details, see the official [HLA nomenclature](https://www.hla.alleles
 The mapper supports full-resolution and two-field HLA allele names, with or without 
 the `HLA-` prefix. Older formats such as `A0101` are also supported.
 
-If an allele is missing from the reference, the optional `fallback_to_two_field=True` 
-allows the mapper to estimate its amino acid sequence using a consensus of alleles sharing the same two-field name.
+If a higher-resolution allele is absent from the reference,
+`fallback_to_two_field=True` uses compatible records sharing its two-field name,
+preserving expression suffixes. This is the default for `map_hla_alleles()` and
+`hla_dosage_to_aa()`.
 
 ```python
 hladat = hp.map_hla_alleles(
@@ -290,13 +309,43 @@ hladat = hp.map_hla_alleles(
 )
 ```
 
-This option is **disabled by default** and is only used when an exact allele match is unavailable. 
-Amino acid positions are assigned only when all compatible reference sequences agree; otherwise, they remain missing.
-
 Missing allele calls or unresolved sequences result in missing amino acid dosages at the affected 
 positions. The mapper reports these issues through warnings or raises an error when `strict=True`.
 
 Mapping issues can be inspected using `hladat.hla_mapping.issues`.
+
+## Ambiguous amino acids and alignment gaps
+
+When resolving a lower-resolution call against several reference sequences,
+missing states are ignored if known states are available:
+
+| Matching states | Mapped state | Interpretation |
+|---|---|---|
+| `M, M` | `M` | Confirmed agreement. |
+| `M, *` | `M` | Inferred from the known sequence. |
+| `M, V` | `?` | Conflicting residues; unassigned. |
+| `M, V, *` | `?` | Conflicting residues with incomplete sequence; unassigned. |
+| `*, *` | `?` | No known sequence; unassigned. |
+| `., .` | `.` | Confirmed alignment gap. |
+| `., P` | `.P` | P or a gap; one combined category. |
+| `., P, *` | `.P` | P or a gap, with incomplete sequence. |
+| `., M, V` | `?` | Multiple distinct residues; unassigned. |
+
+`*` denotes unavailable sequence. `.` is an alignment gap, representing the
+absence of a residue at that column, including insertion/deletion differences.
+For example, `226i1` identifies the first insertion column after position 226.
+A gap is a known state, not missing sequence.
+
+A combined label such as `.P` does not assign its dosage to P or to the gap
+separately. A specific full-resolution allele maps to its own state. Inferred
+positions and alternatives are recorded in `reference.metadata["inferred_positions"]`
+and `reference.metadata["ambiguous_positions"]`.
+
+`?` is not emitted as an AA category. Fractional AA mapping retains contributions
+from assignable alleles when another contribution is unknown, and reports the
+unmapped amount and partial/missing counts in
+`aa.conversion_metadata["resolution"]`. A sample-position with only unresolved
+positive contributions remains missing.
 
 ## Phased amino acid motifs
 
@@ -306,14 +355,15 @@ to be constructed from selected positions.
 ```python
 motifs = hp.aa_motif_dosages(hladat, "DRB1", (11, 13, 71))
 
-print(motifs)  # samples × motifs, e.g. L|F|R
-print(motifs.attrs["allele_groups"])
+print(motifs.AA.data)  # motif markers × samples; compact labels such as LFR
+print(motifs.conversion_metadata["allele_groups"])
 ```
 
 The function identifies unique amino acid combinations across the selected positions and 
 calculates their **dosages (0, 1 or 2)** for each sample. Alleles sharing the same motif are grouped together.
 
-Missing or unresolved amino acids result in missing motif dosages for the affected sample.
+Confirmed motif contributions are retained when the other allele cannot be
+mapped. Samples with no usable motif assignment remain missing.
 
 Motif assignments are cached for efficient reuse. The function accepts mapped `HLAdata` objects 
 or amino acid dosage DataFrames with preserved mapping information.
@@ -346,8 +396,11 @@ constructs motifs only; it does not perform conditional association analysis.
 | `allele_columns` | mapping or `None` | `None` | Gene-to-pair column selection; otherwise detect standard names. |
 | `output` | `str` | `"hladata"` | `"hladata"` or `"dataframe"`. |
 | `save_path` | `str`, `pathlib.Path` or `None` | `None` | Write sample-by-marker TSV and phase sidecar. |
-| `fallback_to_two_field` | `bool` | `False` | For unavailable three/four-field calls, use suffix-preserving two-field consensus and report the inference. |
+| `fallback_to_two_field` | `bool` | `True` | For unavailable three/four-field calls, use suffix-preserving two-field consensus and report the inference. |
 | `strict` | `bool` | `False` | Raise instead of warning when calls/positions cannot be resolved. |
+| `simpleQC` | `bool` | `True` | Apply simple MAF filtering to mapped output states. |
+| `allele_filter` | `float` | `0.005` | Minimum output-state frequency; also require frequency below `1 - allele_filter`. |
+| `verbose` | `bool` | `True` | Print mapping, filtering and timing summaries. |
 
 `load_hla_reference(path)` loads a saved reference. `read_aa_dosage(fileloc,
 phase_path=None)` reads the mapped TSV or dosage DataFrame; a supplied sidecar
