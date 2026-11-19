@@ -253,8 +253,9 @@ def _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
 
 
 def _fit_stepwise_row(abt, qc, meta, variant_id, adapter, geno_cols,
-                      covar_cols, model_type, conditions, null_cache=None, aa_geno=None):
-    """Reject conditional aliases and retain recognised numerical failures as rows."""
+                      covar_cols, model_type, conditions, null_cache=None, aa_geno=None,
+                      check_rank: bool = True):
+    """Optionally reject conditional aliases; retain numerical failures as rows."""
     failed = dict(meta, VARIANT=variant_id, **qc)
     failed.update({"P-value": np.nan, "TEST": "SINGLE" if len(geno_cols) == 1 else "MULTI",
                    "COND_KIND": adapter.KIND if conditions else np.nan,
@@ -264,13 +265,14 @@ def _fit_stepwise_row(abt, qc, meta, variant_id, adapter, geno_cols,
         failed["INFO"] = "insufficient variation" if not geno_cols else "no complete-case samples"
         return failed
     try:
-        terms = [categorical_term(c, abt[c].dtype) for c in covar_cols]
-        # Construct the baseline with the same categorical encoding as the model.
-        baseline = np.asarray(dmatrix("1" + (" + " + " + ".join(terms) if terms else ""), abt))
-        full = np.column_stack([baseline, abt[geno_cols].to_numpy(dtype=float)])
-        if np.linalg.matrix_rank(full) <= np.linalg.matrix_rank(baseline):
-            failed["INFO"] = "no additional information after conditioning"
-            return failed
+        if check_rank:
+            terms = [categorical_term(c, abt[c].dtype) for c in covar_cols]
+            # Construct the baseline with the same categorical encoding as the model.
+            baseline = np.asarray(dmatrix("1" + (" + " + " + ".join(terms) if terms else ""), abt))
+            full = np.column_stack([baseline, abt[geno_cols].to_numpy(dtype=float)])
+            if np.linalg.matrix_rank(full) <= np.linalg.matrix_rank(baseline):
+                failed["INFO"] = "no additional information after conditioning"
+                return failed
         return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
             covar_cols, model_type, conditions, [], null_cache=null_cache, aa_geno=aa_geno)
     except (PerfectSeparationError, np.linalg.LinAlgError, FloatingPointError, OverflowError,
@@ -321,7 +323,8 @@ def _run_standard_one_variant(variant_id: str, *, state: dict) -> dict:
         if state.get("stepwise_scan", False):
             return _fit_stepwise_row(abt, qc, meta, variant_id, adapter, geno_cols,
                 covar_cols_local, model_type, used_conditions,
-                null_cache=state.get("null_cache"), aa_geno=aa_geno)
+                null_cache=state.get("null_cache"), aa_geno=aa_geno,
+                check_rank=state.get("stepwise_check_rank", True))
 
         return _fit_prepared_row(abt, qc, meta, variant_id, adapter, geno_cols,
                                  covar_cols_local, model_type, used_conditions, skipped_conditions,
@@ -350,6 +353,7 @@ def run_standard(
     residue: bool = False,
     _stepwise_scan: int | None = None,
     _stepwise_positions=None,
+    _stepwise_check_rank: bool = True,
     verbose: bool = True,
     use_progress_bar: bool = False,
     print_every: int = 100,
@@ -423,6 +427,7 @@ def run_standard(
         "null_cache": null_cache,
         "residue": residue,
         "stepwise_scan": _stepwise_scan is not None,
+        "stepwise_check_rank": _stepwise_check_rank,
     }
 
 

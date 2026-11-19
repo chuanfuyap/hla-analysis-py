@@ -41,7 +41,7 @@ def _conditioning_label(conditions):
 
 def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
              famfile=None, covar=None, y=None, variant_filter=None, condition_on=None,
-             significance_threshold=5e-6, max_steps=20, residue=False,
+             significance_threshold=5e-6, max_steps=20, residue=False, check_rank: bool = True,
              verbose=True, use_progress_bar=False, print_every=100) -> pd.DataFrame:
     """Perform stepwise conditional association analysis of AA positions.
 
@@ -52,6 +52,8 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
 
     Parameters follow :func:`hapy.stats.analyse`.
     ``max_steps`` limits the number of newly selected positions.
+    ``check_rank=False`` skips the preliminary redundant-predictor check;
+    existing model diagnostics and omnibus DoF checks still apply.
 
     Returns
     -------
@@ -116,7 +118,8 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         table = run_standard(AAAdapter, hladat, config, y=phenotype, covar=covariates,
             condition_on=conditions, residue=False,
             variant_filter=partial(_position_filter, eligible=remaining, user_filter=variant_filter),
-            _stepwise_scan=step, _stepwise_positions=remaining, verbose=verbose, use_progress_bar=use_progress_bar,
+            _stepwise_scan=step, _stepwise_positions=remaining,
+            _stepwise_check_rank=check_rank, verbose=verbose, use_progress_bar=use_progress_bar,
             print_every=print_every)
         scans += 1
         p = pd.to_numeric(table.get("P-value", pd.Series(np.nan, index=table.index)), errors="coerce")

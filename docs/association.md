@@ -344,7 +344,7 @@ winners = hp.stats.stepwise(
 
 The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans.
 
-Output
+### Output
 
 Returns a pandas DataFrame containing the most significant position from each scan, with additional columns:
 
