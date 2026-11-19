@@ -429,7 +429,7 @@ def run_standard(
     prog = (
         ProgressPrinter(
             total=len(variant_ids),
-            desc=f"Scan {_stepwise_scan}" if _stepwise_scan is not None else f"standard[{adapter.KIND}]",
+            desc=f"Step {_stepwise_scan}" if _stepwise_scan is not None else f"standard[{adapter.KIND}]",
             use_tqdm=use_progress_bar,
             print_every=print_every,
         )

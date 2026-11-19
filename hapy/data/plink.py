@@ -1,6 +1,7 @@
 """Read PLINK text and binary filesets into hapy dosage matrices."""
 
 from pathlib import Path
+from numbers import Real
 from typing import Literal
 
 import numpy as np
@@ -9,7 +10,7 @@ import pgenlib
 import time
 
 from .HLAdat import HLAdata
-from .io import GenomicsFileReader, _add_variant_info
+from .io import GenomicsFileReader, _add_variant_info, _apply_r2_filter
 
 __all__ = ["read_plink", "read_genotype"]
 
@@ -29,6 +30,22 @@ def _read_pvar(path, rowskip=None):
     if not required.issubset(frame.columns):
         raise ValueError(f"PVAR must contain columns {sorted(required)}")
     return frame.set_index("ID")
+
+
+def _pvar_r2_scores(variants, column):
+    """Extract numeric imputation scores from a named PVAR column or INFO key."""
+    if column in variants:
+        scores = variants[column]
+    elif "INFO" in variants:
+        scores = variants["INFO"].map(lambda info: dict(
+            field.split("=", 1) for field in info.split(";") if "=" in field
+        ).get(column, np.nan))
+    else:
+        raise ValueError(f"PVAR has no {column!r} column or INFO field")
+    scores = pd.to_numeric(scores, errors="coerce")
+    if scores.isna().all():
+        raise ValueError(f"PVAR contains no numeric {column!r} values")
+    return scores.to_frame(name=1)
 
 
 def _validate_ids(values, label):
@@ -229,6 +246,9 @@ def read_genotype(
     pvarfileloc=None,
     psamfileloc=None,
     variants=None,
+    pvar_R2_column=None,
+    filter_R2=None,
+    R2_minimum: float = 0.5,
     dosage_allele: Literal["alt", "ref", "counted"] | None = None,
 ) -> pd.DataFrame:
     """Read PLINK files into a sample-by-variant genotype DataFrame.
@@ -248,6 +268,15 @@ def read_genotype(
         Exact variant IDs to load, in requested order. Unknown or repeated IDs
         raise ValueError. Defaults to all variants; [] returns samples only.
         Selection precedes binary decoding / RAW numeric-column loading.
+    pvar_R2_column : str, optional
+        R2 field in PVAR INFO or a named PVAR column. Requires PVAR input;
+        unavailable for bfile. Mutually exclusive with filter_R2.
+    filter_R2 : str, pathlib.Path or pandas.DataFrame, optional
+        Headerless variant-ID/R2 file, or DataFrame indexed by variant ID with
+        scores in integer column 1. Supported for all formats.
+    R2_minimum : float, default 0.5
+        Keep only R2 strictly greater than this threshold when a score source
+        is supplied. Missing scores are excluded. No filtering by default.
     dosage_allele : {"alt", "ref", "counted"}, optional
         Defaults to ALT for binary input and the header's counted allele for
         RAW. REF/ALT requests for RAW require PVAR. "counted" is RAW-only.
@@ -270,7 +299,8 @@ def read_genotype(
     with metadata must be biallelic with known, distinct REF and ALT alleles.
     RAW without PVAR retains counted dosages without inferring other alleles.
     IIDs must be unique across families. Values use the diploid 0–2 dosage
-    scale; fractional values are preserved. No R2, frequency or missingness
+    scale; fractional values are preserved. Optional R2 filtering follows
+    variant selection and precedes dosage decoding. No frequency or missingness
     filtering is applied. Select variants to limit dense-matrix memory use.
 
     Examples
@@ -287,6 +317,11 @@ def read_genotype(
 
     if format not in {"pgen", "bfile", "raw"}:
         raise ValueError("format must be 'pgen', 'bfile', or 'raw'")
+    if filter_R2 is not None and pvar_R2_column is not None:
+        raise ValueError("Use either filter_R2 or pvar_R2_column, not both")
+    if (isinstance(R2_minimum, bool) or not isinstance(R2_minimum, Real)
+            or not np.isfinite(R2_minimum) or not 0 <= R2_minimum <= 1):
+        raise ValueError("R2_minimum must be between 0 and 1")
     if dosage_allele is None:
         dosage_allele = "counted" if format == "raw" else "alt"
     if dosage_allele not in {"alt", "ref", "counted"}:
@@ -303,8 +338,8 @@ def read_genotype(
         raise FileNotFoundError(path)
     inferred_raw = False
     if format == "bfile":
-        if pvarfileloc is not None:
-            raise ValueError("bfile uses BIM metadata, not PVAR")
+        if pvarfileloc is not None or pvar_R2_column is not None:
+            raise ValueError("bfile uses BIM metadata; PVAR options are not applicable")
         metadata = pd.read_csv(prefix + ".bim", sep=r"\s+", header=None,
                                names=["CHROM", "ID", "CM", "POS", "ALT", "REF"],
                                dtype=str, keep_default_na=False).set_index("ID")
@@ -317,6 +352,8 @@ def read_genotype(
         pvar_path = Path(pvarfileloc) if pvarfileloc is not None else Path(prefix + ".pvar")
         inferred_raw = format == "raw" and pvarfileloc is None and not pvar_path.is_file()
         if inferred_raw:
+            if pvar_R2_column is not None:
+                raise ValueError("pvar_R2_column requires a PVAR file; supply pvarfileloc.")
             if dosage_allele != "counted":
                 raise ValueError("RAW REF/ALT orientation requires a PVAR file")
             metadata = _raw_variants(path)
@@ -347,6 +384,11 @@ def read_genotype(
         if len(missing):
             raise ValueError(f"Variant IDs not found in input: {missing.tolist()}")
         selected = available.loc[ids]
+    if pvar_R2_column is not None:
+        filter_R2 = _pvar_r2_scores(metadata, pvar_R2_column)
+    if filter_R2 is not None:
+        selected = _apply_r2_filter(selected,
+            str(filter_R2) if isinstance(filter_R2, Path) else filter_R2, R2_minimum)
     if not inferred_raw:
         for column in ("REF", "ALT"):
             if (selected[column].isin(["", ".", "0"]).any()
@@ -476,18 +518,7 @@ class PLINKFileReader(GenomicsFileReader):
                   else _read_binary(path, variants, samples, effect))
 
         if pvar_R2_column is not None:
-            if pvar_R2_column in variants:
-                scores = variants[pvar_R2_column]
-            elif "INFO" in variants:
-                scores = variants["INFO"].map(lambda info: dict(
-                    field.split("=", 1) for field in info.split(";") if "=" in field
-                ).get(pvar_R2_column, np.nan))
-            else:
-                raise ValueError(f"PVAR has no {pvar_R2_column!r} column or INFO field")
-            scores = pd.to_numeric(scores, errors="coerce")
-            if scores.isna().all():
-                raise ValueError(f"PVAR contains no numeric {pvar_R2_column!r} values")
-            self.filter_R2 = scores.to_frame(name=1)
+            self.filter_R2 = _pvar_r2_scores(variants, pvar_R2_column)
         alleles = pd.DataFrame({"alleleA": effect,
                                 "alleleB": selected["REF"].where(effect == selected["ALT"], selected["ALT"])})
         if inferred_raw:

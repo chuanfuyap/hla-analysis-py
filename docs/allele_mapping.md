@@ -342,8 +342,7 @@ calculates their **dosages (0, 1 or 2)** for each sample. Alleles sharing the sa
 Confirmed motif contributions are retained when the other allele cannot be
 mapped. Samples with no usable motif assignment remain missing.
 
-**Note:** Phasing is preserved within each HLA gene, but not between genes. This function 
-constructs motifs only; use `hp.stats.stepwise(selection="motif", ...)` for conditional haplotype association analysis (see [association analysis](association.md#stepwise-motif-haplotype-selection)).
+**Note:** Phasing is preserved within each HLA gene, but not between genes.
 
 ## Parameters
 

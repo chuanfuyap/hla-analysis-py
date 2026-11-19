@@ -10,7 +10,6 @@ import pandas as pd
 
 from .adapters.aa import AAAdapter
 from .preprocess import prepare_y, prepare_covar
-from .progress import format_seconds
 from .runners.standard_runner import (
     run_standard, _normalize_condition_on, _validate_conditioning_variants,
 )
@@ -21,6 +20,25 @@ def _position_filter(ctx, *, eligible, user_filter):
     return ctx["variant_id"] in eligible and (user_filter is None or user_filter(ctx))
 
 
+def _conditioning_label(conditions):
+    """Group full AA position IDs into readable, gene-specific labels."""
+    groups = {}
+    for variant in conditions:
+        fields = variant.split("_")
+        if len(fields) < 4 or fields[0] != "AA":
+            groups.setdefault(None, []).append(variant)
+            continue
+        groups.setdefault(fields[1], []).append(fields[2])
+    labels = []
+    for gene, positions in groups.items():
+        if gene is None:
+            labels.extend(positions)
+        else:
+            noun = "position" if len(positions) == 1 else "positions"
+            labels.append(f"{gene} {noun} {', '.join(positions)}")
+    return "; ".join(labels)
+
+
 def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
              famfile=None, covar=None, y=None, variant_filter=None, condition_on=None,
              significance_threshold=5e-6, max_steps=20, residue=False,
@@ -29,23 +47,23 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
 
     The most significant position is added to the conditioning set after
     each scan until no further positions meet the significance threshold.
-    Uses the existing single and omnibus tests.
+    Uses the existing single and omnibus tests. Only selection="position"
+    and residue=False are supported.
 
     Parameters follow :func:`hapy.stats.analyse`.
-    ``max_steps`` limits the number of selected positions.
+    ``max_steps`` limits the number of newly selected positions.
 
     Returns
     -------
     pandas.DataFrame
-        Most significant position from each scan, including STEP, SELECTED,
-        STEP_SECONDS and TOTAL_SECONDS. The final nonsignificant result is
-        retained but not selected. Selected positions, stopping reason and
-        other metadata are stored in ``attrs``.
+        Most significant position from each scan, including STEP and SELECTED.
+        The final nonsignificant result is retained but not selected.
+        Conditions, stopping reason, scans, runtime and diagnostics are in attrs.
 
     Notes
     -----
     Scans run sequentially, with parallel testing within each scan.
-    To continue the analysis, pass ``attrs["condition_on"]`` to a new call.
+    To continue, pass attrs["condition_on"] to a new call.
     """
     started = time.perf_counter()
     if kind != "AA" or selection != "position":
@@ -83,7 +101,7 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
     scans = 0
     reason = "max_steps"
     if verbose:
-        print(f"Starting stepwise AA position analysis; threshold={significance_threshold:g}", flush=True)
+        print(f"STARTING STEPWISE CONDITIONAL ANALYSIS - {selection} based", flush=True)
     for step in range(1, max_steps + 1):
         remaining = eligible.difference(conditions)
         if not remaining:
@@ -91,7 +109,10 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
             break
         scan_started = time.perf_counter()
         if verbose:
-            print(f"Scan {step}: conditioning on {', '.join(conditions) or 'none'}", flush=True)
+            analysis = "Conditional analysis" if conditions else "Initial analysis"
+            print(f"Step {step} — {analysis}", flush=True)
+            if conditions:
+                print(f"Conditioning on: {_conditioning_label(conditions)}", flush=True)
         table = run_standard(AAAdapter, hladat, config, y=phenotype, covar=covariates,
             condition_on=conditions, residue=False,
             variant_filter=partial(_position_filter, eligible=remaining, user_filter=variant_filter),
@@ -107,7 +128,8 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         if not valid.any():
             reason = "no_valid_tests"
             if verbose:
-                print(f"Scan {step} complete: no valid tests; elapsed={format_seconds(time.perf_counter() - scan_started)}", flush=True)
+                print("No valid tests. Stopping.", flush=True)
+                print(f"Elapsed: {time.perf_counter() - scan_started:.1f}s\n", flush=True)
             break
         candidates = table.loc[valid].copy()
         candidates["P-value"] = p.loc[valid]
@@ -116,15 +138,19 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         winner.update(STEP=step, SELECTED=accepted)
         rows.append(winner)
         if verbose:
-            action = "selected" if accepted else "threshold not met"
-            print(f"Scan {step} complete: best={winner['VARIANT']}, p={winner['P-value']:.6g}, "
-                  f"N={winner.get('N_used', '?')}; {action}; "
-                  f"elapsed={format_seconds(time.perf_counter() - scan_started)}", flush=True)
+            if accepted:
+                print(f"Most significant: {winner['VARIANT']}", flush=True)
+                print(f"P-value: {winner['P-value']:.2e}", flush=True)
+            else:
+                print(f"Best remaining P-value: {winner['P-value']:.2e}", flush=True)
+                print("Threshold not met. Stopping.", flush=True)
+            print(f"Elapsed: {time.perf_counter() - scan_started:.1f}s\n", flush=True)
         if not accepted:
             reason = "threshold_not_met"
             break
         conditions.append(winner["VARIANT"])
-    if reason == "max_steps" and not eligible.difference(conditions):
+    remaining = eligible.difference(conditions)
+    if reason == "max_steps" and not remaining:
         reason = "no_remaining_positions"
     out = pd.DataFrame(rows) if rows else pd.DataFrame(columns=[
         "VARIANT", "P-value", "TEST", "COND_VARIANTS", "STEP", "SELECTED"])
@@ -135,6 +161,13 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
                      scans=scans, elapsed_seconds=elapsed,
                      significance_threshold=significance_threshold, failed_tests=failures)
     if verbose:
-        print(f"Finished: {len(conditions) - len(initial)} positions selected; {scans} scans; "
-              f"stop={reason}; total elapsed={format_seconds(elapsed)}", flush=True)
+        if reason == "no_remaining_positions":
+            print("No remaining positions. Stopping.", flush=True)
+        elif reason == "max_steps":
+            print("Maximum selected positions reached. Stopping.", flush=True)
+        selected = len(conditions) - len(initial)
+        scan_noun = "scan" if scans == 1 else "scans"
+        position_noun = "position" if selected == 1 else "positions"
+        print("Analysis complete", flush=True)
+        print(f"{scans} {scan_noun} | {selected} selected {position_noun} | Total: {elapsed:.1f}s", flush=True)
     return out
