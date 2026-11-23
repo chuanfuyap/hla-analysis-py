@@ -1,6 +1,7 @@
 .vscode/
 .DS_Store
 hapy.egg-info/
+hla_hapy.egg-info/
 build/lib/hapy
 build/
 .hapy.egg-info/

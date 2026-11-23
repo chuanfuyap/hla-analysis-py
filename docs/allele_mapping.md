@@ -408,3 +408,23 @@ Users must download the data and build their references locally.
 
 When publishing, cite the [IPD-IMGT/HLA database](https://www.ebi.ac.uk/ipd/imgt/hla/) and the 
 relevant Ensembl annotation resource. Record the IPD release and `hapy` version to support reproducibility.
+
+
+### Searching more than one gene
+
+```python
+result = hp.stats.stepwise(
+    hladat, cfg, y=phenotype, covar=covariates,
+    selection="motif", reference=reference, max_genes=2, max_steps=20,
+)
+```
+
+The default `max_genes=1` searches one gene. With a larger limit, each
+completed gene's final motifs remain fixed adjustment covariates during
+position scans and motif searches in other genes. Motifs never span genes.
+`max_steps` limits new selections across the whole analysis. To resume,
+pass `condition_on=result.attrs["condition_on"]`: earlier genes remain fixed
+and the last gene resumes. Supplied genes count toward `max_genes`, but
+supplied positions do not consume `max_steps`. Results retain terminal
+nonsignificant winners and report `selected_positions` and `gene_stop_reasons`
+by gene in `.attrs`.

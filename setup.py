@@ -23,7 +23,7 @@ def get_version(rel_path: str) -> str:
     raise RuntimeError("Unable to find version string.")
 
 
-setup(name="hapy",
+setup(name="hla-hapy",
       version=get_version("hapy/__init__.py"),
       description='Tools to haplotype analysis for genomics studies.',
       author='Chuan Fu Yap',
@@ -44,4 +44,6 @@ setup(name="hapy",
         'pgenlib>=0.90,<1',
         'matplotlib>=3.6,<4'
     ],
+    long_description=read("README.md"),
+    long_description_content_type="text/markdown",
 )

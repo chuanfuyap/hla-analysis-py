@@ -53,6 +53,13 @@ conda activate hapy
 pip install .
 ```
 
+Alternatively install via PyPI
+
+```bash
+pip install hla-hapy
+```
+
+
 ## Quick Start
 
 ### PLINK input
@@ -172,10 +179,7 @@ See [visualisation documentation](docs/visualisation.md) and
 
 ## Status
 
-The core analysis framework is functional and actively under development. Current work includes:
-- stepwise conditional analyses
-- allele mapping
-- haplotype analysis
+`hapy` is ready to use for HLA amino acid fine mapping. If there are features you wish to see on the package please reach out. 
 
 ## Contact
 
