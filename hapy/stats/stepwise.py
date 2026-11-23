@@ -568,8 +568,8 @@ def _multi_gene_motif(hladat, config, phenotype, covariates, eligible, condition
                 break
             remaining = {v for v in eligible if str(annotations[v]["GENE"]) not in completed}
             if verbose and completed:
-                print("SCANNING POSITIONS OUTSIDE COMPLETED GENES.", flush=True)
-                print("-------------------------------------------", flush=True)
+                print("SCANNING POSITIONS OUTSIDE COMPLETED GENE(S).", flush=True)
+                print("---------------------------------------------", flush=True)
                 print(flush=True)
             seed = _position_based(hladat, config, phenotype, adjustment, remaining, [],
                 significance_threshold, 1, check_rank, variant_filter, verbose,
