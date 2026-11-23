@@ -27,6 +27,24 @@ def parse_aa_marker(marker):
             "EXON": None if match[5] in {None, "NA"} else int(match[5]), "RESIDUE": match[6]}
 
 
+def _load_position_table(text):
+    """Restore nullable integers explicitly, including with pandas 1.x."""
+    table = json.loads(text)
+    integer_types = {}
+    for field in table["schema"]["fields"]:
+        if field["type"] == "integer":
+            integer_types[field["name"]] = field.pop("extDtype", "int64")
+            # Older pandas ignores extDtype for integer fields and attempts
+            # int64 conversion before nullable coordinates can be restored.
+            field["type"] = "any"
+    frame = pd.read_json(StringIO(json.dumps(table)), orient="table")
+    for column, dtype in integer_types.items():
+        if dtype == "int64" and frame[column].isna().any():
+            dtype = "Int64"
+        frame[column] = frame[column].astype(dtype)
+    return frame
+
+
 @dataclass(eq=False)
 class HLAAlleleMapping:
     """Compact called-allele matrices and two integer allele IDs per sample/gene.
@@ -185,7 +203,7 @@ class HLAAlleleMapping:
             alleles = {g: archive[f"{g}_alleles"].tolist() for g in genes}
             matrices = {g: archive[f"{g}_matrix"].copy() for g in genes}
             ids = {g: archive[f"{g}_ids"].copy() for g in genes}
-            positions = {g: pd.read_json(StringIO(str(archive[f"{g}_positions"])), orient="table") for g in genes}
+            positions = {g: _load_position_table(str(archive[f"{g}_positions"])) for g in genes}
         for gene in genes:
             if ids[gene].shape != (len(calls), 2) or matrices[gene].shape != (len(alleles[gene]), len(positions[gene])):
                 raise ValueError("Invalid allele-phase sidecar dimensions.")
