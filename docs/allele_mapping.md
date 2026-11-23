@@ -344,6 +344,16 @@ mapped. Samples with no usable motif assignment remain missing.
 
 **Note:** Phasing is preserved within each HLA gene, but not between genes.
 
+### HLA alleles corresponding to motifs
+
+Both `aa_motif_dosages()` and `hla_dosage_to_motifs()` retain the HLA alleles contributing to each amino acid motif.
+
+```python
+motifs.conversion_metadata["allele_groups"]
+```
+
+This returns a dictionary mapping each motif to its corresponding HLA alleles, allowing users to identify which alleles share the same amino acid sequence at the selected positions.
+
 ## Parameters
 
 ### `build_hla_reference()`

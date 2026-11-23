@@ -360,6 +360,7 @@ class HLAReference:
     positions: dict
     metadata: dict
     _resolved: dict = field(default_factory=dict, repr=False)
+    _motif_rows: dict = field(default_factory=dict, repr=False)
 
     @property
     def version(self):
@@ -465,17 +466,20 @@ class HLAReference:
         allele = normalise_hla_allele(allele, allow_single_field=True)
         if allele is None:
             return None
-        match = _ALLELE.fullmatch(allele)
-        gene, fields, suffix = match.groups()
-        prefix = gene + "*" + fields
-        ids = [i for i, name in enumerate(self.alleles.get(gene, []))
-               if (name == prefix or name.startswith(prefix + ":") or name == prefix + suffix)
-               and (not suffix or name.endswith(suffix))]
-        if not suffix and len(fields.split(":")) == 2:
-            ids = [i for i in ids if not self.alleles[gene][i].endswith("N")]
-        if not ids:
+        if allele not in self._motif_rows:
+            match = _ALLELE.fullmatch(allele)
+            gene, fields, suffix = match.groups()
+            prefix = gene + "*" + fields
+            ids = [i for i, name in enumerate(self.alleles.get(gene, []))
+                   if (name == prefix or name.startswith(prefix + ":") or name == prefix + suffix)
+                   and (not suffix or name.endswith(suffix))]
+            if not suffix and len(fields.split(":")) == 2:
+                ids = [i for i in ids if not self.alleles[gene][i].endswith("N")]
+            self._motif_rows[allele] = self.matrices.get(gene, np.empty((0, 0)))[ids]
+        rows = self._motif_rows[allele]
+        if not len(rows):
             return None
-        selected = self.matrices[gene][ids][:, list(indices)]
+        selected = rows[:, list(indices)]
         from ._motifs import motif_from_sequences
         return motif_from_sequences(selected)
 

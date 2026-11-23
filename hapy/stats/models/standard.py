@@ -171,3 +171,56 @@ def fit_omnibus(abt: pd.DataFrame, geno_cols: list[str], covar_cols: list[str], 
     #             out[f"cov_{g1}__{g2}"] = float(cov.loc[g1, g2])
 
     return out
+
+def fit_motif_omnibus(abt: pd.DataFrame, reduced_cols: list[str], expanded_cols: list[str],
+                      covar_cols: list[str], model_type: str, *, null_cache=None,
+                      check_rank: bool = False, term_labels=None) -> dict:
+    """Compare covariates + expanded motifs against covariates + existing motifs.
+
+    Both models use identical complete-case samples. The stepwise builder
+    verifies that expanded groups reconstruct the existing groups and drops
+    a compatible reference. Additional rank checking is optional.
+    """
+    abt = abt.dropna(subset=["Y", *covar_cols, *reduced_cols, *expanded_cols])
+    if abt.empty:
+        return {"INFO": "no complete-case samples", "TEST": "MOTIF"}
+    cov_terms = _cov_terms(abt, covar_cols)
+    reduced_terms = _cov_terms(abt, reduced_cols)
+    expanded_terms = _cov_terms(abt, expanded_cols)
+    null_terms = cov_terms + reduced_terms
+    alt_terms = cov_terms + expanded_terms
+    
+    nullf = "Y ~ " + " + ".join(null_terms) if null_terms else "Y ~ 1"
+    altf = "Y ~ " + " + ".join(alt_terms) if alt_terms else "Y ~ 1"
+    if check_rank:
+        from patsy import dmatrix
+        baseline = np.asarray(dmatrix(nullf.split("~", 1)[1], abt))
+        full = np.asarray(dmatrix(altf.split("~", 1)[1], abt))
+        if np.linalg.matrix_rank(full) <= np.linalg.matrix_rank(baseline):
+            return {"INFO": "no additional information after motif expansion", "TEST": "MOTIF"}
+    alt = _fit(altf, abt, model_type)
+    baseline_cols = covar_cols + reduced_cols
+    baseline = abt[[*baseline_cols, "Y"]]
+    reuse = null_cache is not None and null_cache.matches(
+        baseline, model_type, (nullf, tuple(baseline_cols)))
+    null = null_cache if reuse else fit_standard_null(abt, baseline_cols, model_type)
+    issues = []
+    for label, info in (("null model", null.info), ("full model", _fit_info(alt, model_type))):
+        if info:
+            issues.append(f"{label}: {info}")
+    if issues:
+        return {"INFO": "; ".join(issues), "TEST": "MOTIF"}
+    lrstat = 2 * (alt.llf - null.log_likelihood)
+    dof = alt.df_model - null.df_model
+    if dof <= 0:
+        return {"INFO": "no additional information after motif expansion", "TEST": "MOTIF"}
+    if lrstat < -1e-8:
+        return {"INFO": "full model likelihood below null model", "TEST": "MOTIF"}
+    lrstat = max(0., lrstat)
+    labels = term_labels or {}
+    return {
+        "P-value": float(stats.chi2.sf(lrstat, dof)), "Statistic": float(lrstat),
+        "DoF": int(dof), "TEST": "MOTIF", "INFO": np.nan,
+        "Beta": ";".join(f"{labels.get(c, c)}={alt.params[t]:.12g}" for c, t in zip(expanded_cols, expanded_terms)),
+        "StdErr": ";".join(f"{labels.get(c, c)}={alt.bse[t]:.12g}" for c, t in zip(expanded_cols, expanded_terms)),
+    }

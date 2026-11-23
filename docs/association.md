@@ -344,6 +344,9 @@ winners = hp.stats.stepwise(
 
 The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans.
 
+`check_rank=False` is the default for both selection modes. Set `check_rank=True`
+to enable the extra preliminary rank check. 
+
 ### Output
 
 Returns a pandas DataFrame containing the most significant position from each scan, with additional columns:
@@ -370,3 +373,53 @@ continued = hp.stats.stepwise(
 ```
 
 This starts a new stepwise analysis conditional on all previously selected positions.
+
+
+### Stepwise motif (haplotype) selection
+
+```python
+res = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    covar=covar,
+    selection="motif",  # "haplotype" is an alias
+    reference=reference,
+    significance_threshold=5e-6,
+    max_steps=20,
+    check_rank=False,
+    verbose=True,
+)
+```
+
+The first scan identifies the most significant amino acid position. Subsequent scans test additional positions within the same HLA gene by comparing existing and expanded motifs using a likelihood-ratio test. This follows the conditional haplotype approach described by [Sakaue et al. (2023)](https://doi.org/10.1038/s41596-023-00853-4).
+
+**Two motif-building methods are supported:**
+
+- `aa_motif_dosages()`: Uses the allele mapping retained by `map_hla_alleles()`. No reference is required.
+- `hla_dosage_to_motifs()`: Uses HLA allele dosages from `hladat.HLA.data` and an `HLAReference`, including fractional dosages.
+
+The appropriate method is selected automatically. Retain the original `hladat` containing HLA allele information, as amino acid dosages alone cannot recover haplotype phase.
+
+**Output**
+
+Returns a pandas DataFrame containing the most significant position from each scan, including the final nonsignificant result. Additional columns report the selected motif positions (`MOTIF_POSITIONS`) and the number of motif groups in the reduced and expanded models (`N_REDUCED_MOTIFS`, `N_EXPANDED_MOTIFS`).
+
+Selected positions, stopping reason, runtime and other metadata are available in `res.attrs`.
+
+**Continue from previous results**
+
+```python
+continued = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    covar=covar,
+    reference=reference,
+    selection="motif",
+    condition_on=res.attrs["condition_on"],
+    significance_threshold=1e-5,
+)
+```
+
+This continues selection using the previously selected positions as the initial motif model. `max_steps` limits newly selected positions, excluding initial conditions.

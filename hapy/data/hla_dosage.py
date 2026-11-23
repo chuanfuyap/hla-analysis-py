@@ -293,7 +293,7 @@ def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
                          allele_axis="index", sum_tolerance=0.02,
                          unknown_tolerance=1e-8, output="hladata", simpleQC=True,
                          allele_filter=0.005, verbose=True):
-    """Convert HLA allele dosages into fractional within-gene motif dosages.
+    """Convert HLA allele dosages into fractional within-gene motif dosages, i.e. input from HLA alleles load from genotype files
 
     Parameters
     ----------
