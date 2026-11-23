@@ -330,7 +330,7 @@ The mapper preserves HLA allele phasing within each gene, allowing amino acid mo
 to be constructed from selected positions.
 
 ```python
-motifs = hp.aa_motif_dosages(hladat, "DRB1", (11, 13, 71))
+motifs = hp.mapped_aa_motif(hladat, "DRB1", (11, 13, 71))
 
 print(motifs.AA.data)  # motif markers × samples; compact labels such as LFR
 print(motifs.conversion_metadata["allele_groups"])
@@ -346,7 +346,7 @@ mapped. Samples with no usable motif assignment remain missing.
 
 ### HLA alleles corresponding to motifs
 
-Both `aa_motif_dosages()` and `hla_dosage_to_motifs()` retain the HLA alleles contributing to each amino acid motif.
+Both `mapped_aa_motif()` and `dosage_aa_motif()` retain the HLA alleles contributing to each amino acid motif.
 
 ```python
 motifs.conversion_metadata["allele_groups"]
@@ -387,7 +387,7 @@ This returns a dictionary mapping each motif to its corresponding HLA alleles, a
 
 `load_hla_reference(path)` loads a saved reference. `read_aa_dosage(fileloc,
 phase_path=None)` reads the mapped TSV or dosage DataFrame; a supplied sidecar
-path must exist. `aa_motif_dosages(data, gene, positions)` requires preserved
+path must exist. `mapped_aa_motif(data, gene, positions)` requires preserved
 allele-pair mapping and a nonempty unique sequence of position identifiers.
 
 ## Updating and reproducibility

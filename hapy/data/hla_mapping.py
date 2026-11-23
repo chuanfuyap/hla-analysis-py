@@ -435,7 +435,7 @@ def read_aa_dosage(fileloc, *, phase_path=None):
     return result
 
 
-def aa_motif_dosages(data, gene, positions, *, output="hladata", simpleQC=True,
+def mapped_aa_motif(data, gene, positions, *, output="hladata", simpleQC=True,
                      allele_filter=0.005, verbose=True):
     """Calculate within-gene motif dosages from mapped allele pairs, i.e. input from HLA mapped from calls file. 
 

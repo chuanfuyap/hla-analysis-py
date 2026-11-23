@@ -218,15 +218,15 @@ def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
 def _choose_motif_builder(hladat, reference, index):
     """Choose one established builder for the whole search, with per-run caches."""
     from copy import copy
-    from ..data.hla_mapping import aa_motif_dosages
-    from ..data.hla_dosage import hla_dosage_to_motifs
+    from ..data.hla_mapping import mapped_aa_motif
+    from ..data.hla_dosage import dosage_aa_motif
     from ..data.hla_reference import HLAReference, load_hla_reference
 
     mapping = getattr(hladat, "hla_mapping", None)
     if mapping is not None:
         mapping = copy(mapping)
         mapping.motif_cache = dict(mapping.motif_cache)
-        return partial(aa_motif_dosages, mapping, output="dataframe",
+        return partial(mapped_aa_motif, mapping, output="dataframe",
                        simpleQC=False, verbose=False)
     if reference is None:
         raise ValueError("Motif selection requires a stored allele mapping or HLA dosages and reference.")
@@ -244,7 +244,7 @@ def _choose_motif_builder(hladat, reference, index):
     if not dosage.columns.is_unique:
         raise ValueError("HLA dosage sample IDs must be unique.")
     dosage = dosage.reindex(columns=index)
-    return partial(hla_dosage_to_motifs, dosage, reference, output="dataframe",
+    return partial(dosage_aa_motif, dosage, reference, output="dataframe",
                    simpleQC=False, verbose=False)
 
 

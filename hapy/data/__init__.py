@@ -6,14 +6,14 @@ from hapy.data.io import *
 from hapy.data.HLAdat import HLAdata
 from hapy.data.plink import read_plink, read_genotype
 
-__all__ = ["insertion_motifs", "resolve_hla_resolution", "hla_dosage_to_aa", "hla_dosage_to_motifs", "download_hla_inputs", "read_famfile", "read_bgl", "read_gprobs", "read_dosage", "read_plink", "read_genotype", "HLAdat", "HLAReference", "HLAAlleleMapping", "build_hla_reference", "load_hla_reference", "available_hla_genes", "map_hla_alleles", "read_aa_dosage", "aa_motif_dosages"]
+__all__ = ["insertion_motifs", "resolve_hla_resolution", "hla_dosage_to_aa", "dosage_aa_motif", "download_hla_inputs", "read_famfile", "read_bgl", "read_gprobs", "read_dosage", "read_plink", "read_genotype", "HLAdat", "HLAReference", "HLAAlleleMapping", "build_hla_reference", "load_hla_reference", "available_hla_genes", "map_hla_alleles", "read_aa_dosage", "mapped_aa_motif"]
 
 from .hla_reference import HLAReference, build_hla_reference, load_hla_reference, available_hla_genes
-from .hla_mapping import HLAAlleleMapping, map_hla_alleles, read_aa_dosage, aa_motif_dosages
+from .hla_mapping import HLAAlleleMapping, map_hla_alleles, read_aa_dosage, mapped_aa_motif
 
 from .hla_download import download_hla_inputs
 
-from .hla_dosage import hla_dosage_to_aa, hla_dosage_to_motifs
+from .hla_dosage import hla_dosage_to_aa, dosage_aa_motif
 
 from .hla_resolution import resolve_hla_resolution
 

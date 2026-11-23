@@ -396,8 +396,8 @@ The first scan identifies the most significant amino acid position. Subsequent s
 
 **Two motif-building methods are supported:**
 
-- `aa_motif_dosages()`: Uses the allele mapping retained by `map_hla_alleles()`. No reference is required.
-- `hla_dosage_to_motifs()`: Uses HLA allele dosages from `hladat.HLA.data` and an `HLAReference`, including fractional dosages.
+- `mapped_aa_motif()`: Uses the allele mapping retained by `map_hla_alleles()`. No reference is required.
+- `dosage_aa_motif()`: Uses HLA allele dosages from `hladat.HLA.data` and an `HLAReference`, including fractional dosages.
 
 The appropriate method is selected automatically. Retain the original `hladat` containing HLA allele information, as amino acid dosages alone cannot recover haplotype phase.
 

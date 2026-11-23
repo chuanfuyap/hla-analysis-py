@@ -3,7 +3,7 @@
 Functions
 ---------
 hla_dosage_to_aa : Calculate expected dosages for individual AA residues.
-hla_dosage_to_motifs : Calculate expected within-gene AA motif copy counts.
+dosage_aa_motif : Calculate expected within-gene AA motif copy counts.
 
 Input matrices contain alleles on rows and samples on columns by default.
 Outputs are hapy HLAdata objects with AA.data and AA.info, ready for analysis.
@@ -289,7 +289,7 @@ def _gene_dosage_to_aa(dosages, reference, gene, *, allele_axis="index",
     return result
 
 
-def hla_dosage_to_motifs(dosages, reference, gene, positions, *,
+def dosage_aa_motif(dosages, reference, gene, positions, *,
                          allele_axis="index", sum_tolerance=0.02,
                          unknown_tolerance=1e-8, output="hladata", simpleQC=True,
                          allele_filter=0.005, verbose=True):
