@@ -8,7 +8,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from .adapters.aa import AAAdapter
+from .adapters.aa import AAAdapter, aa_frequency
 from .preprocess import prepare_y, prepare_covar, make_model_table
 from .parallel import parallel_imap_batched
 from .progress import ProgressPrinter
@@ -292,6 +292,8 @@ def _motif_candidate(variant, *, builder, gene, positions, annotations, old_moti
                N_COND_VARIANTS=len(conditions), TEST="MOTIF", **{"P-value": np.nan},
                MOTIF_POSITIONS=";".join(positions + [position]),
                N_REDUCED_MOTIFS=len(old_motifs.columns), N_EXPANDED_MOTIFS=len(new_motifs.columns))
+    row.update(Amino_Acids=", ".join(str(c) for c in new_motifs.columns),
+               AAcount=len(new_motifs.columns), AA_AF=np.nan, Ref_AA=np.nan)
     parents = _expanded_motif_parents(old_motifs, new_motifs)
     if parents is None:
         return dict(row, INFO="expanded motif groups do not refine the existing groups"), None
@@ -300,6 +302,7 @@ def _motif_candidate(variant, *, builder, gene, positions, annotations, old_moti
         return dict(row, INFO="no observed child of the reduced reference motif"), None
     # Keeping the reference in the same lineage preserves nesting with partial dosages.
     new_motifs.attrs["reference"] = new_motifs[children].sum().idxmax()
+    row["Ref_AA"] = new_motifs.attrs["reference"]
     reduced, _ = _motif_genotype(old_motifs, "MOTIF_R")
     expanded, labels = _motif_genotype(new_motifs, "MOTIF_F")
     ctx = dict(analysis="standard", kind="AA", variant_id=variant,
@@ -311,6 +314,7 @@ def _motif_candidate(variant, *, builder, gene, positions, annotations, old_moti
         raise ValueError("Covariate names collide with internal motif column names.")
     abt, qc = make_model_table(predictors, y, covar)
     row.update(qc)
+    row["AA_AF"] = aa_frequency(new_motifs, abt.index)
     if abt.empty:
         return dict(row, INFO="no complete-case samples"), None
     # Verify dosages, not just labels: incomplete mappings may lose a parent contribution.
@@ -332,7 +336,6 @@ def _motif_candidate(variant, *, builder, gene, positions, annotations, old_moti
                 "nan, inf or invalid value detected in weights")):
             raise
         row["INFO"] = f"numerical fit failure: ValueError: {exc}"
-    row["Ref_AA"] = new_motifs.attrs["reference"]
     return row, new_motifs
 
 
