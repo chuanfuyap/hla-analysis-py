@@ -120,3 +120,131 @@ def compare_positions(
         "POSITION_B": position_b,
         **result,
     }])
+
+
+def compare_positions_motif(hladat, config: StandardConfig, positions_a, positions_b,
+                            *, famfile=None, covar=None, y=None, reference=None,
+                            min_delta_bic=2.0) -> pd.DataFrame:
+    """Compare alternative amino acid motifs using BIC and conditional tests.
+
+    Parameters
+    ----------
+    hladat : HLAdata
+        Retained allele mapping, or HLA allele dosages with a reference.
+    config : StandardConfig
+        Configuration with model_type="linear" or "logit".
+    positions_a : sequence of str
+        AA variant IDs for motif A, from hladat.AA.info["AA_ID"].
+    positions_b : sequence of str
+        AA variant IDs for motif B. Both sets must share a position and gene.
+    famfile : pandas.DataFrame, optional
+        Sample information containing IID and PHENO when y is not supplied.
+    covar : pandas.DataFrame, optional
+        Covariates indexed by IID or containing an IID column.
+    y : pandas.Series or array-like, optional
+        Phenotype indexed by IID, or aligned to famfile row order.
+    reference : HLAReference or path, optional
+        Required when no retained allele mapping is available.
+    min_delta_bic : float, optional
+        Minimum BIC difference to prefer one model. Defaults to 2.
+
+    Returns
+    -------
+    pandas.DataFrame
+        One row with position sets, motif counts, BIC, conditional tests,
+        sample count, recommendation and INFO.
+
+    Notes
+    -----
+    A and B use their respective motifs. AB uses the full motif over the
+    union of positions, including the shared positions. All models use
+    identical samples. A+B recommends this combined motif.
+    """
+    from ._motif import (_choose_motif_builder, _build_motifs,
+                         _expanded_motif_parents, _motif_genotype)
+    from .models.standard import fit_motif_comparison
+
+    if not isinstance(config, StandardConfig) or config.model_type not in ("linear", "logit"):
+        raise ValueError("config must be StandardConfig with model_type='linear' or 'logit'.")
+    if not np.isfinite(min_delta_bic) or min_delta_bic < 0:
+        raise ValueError("min_delta_bic must be finite and nonnegative.")
+    if not hasattr(hladat, "AA"):
+        raise ValueError("AA not loaded.")
+    sets = []
+    for positions in (positions_a, positions_b):
+        if isinstance(positions, (str, bytes)):
+            raise ValueError("positions must be sequences of AA variant IDs.")
+        positions = list(positions)
+        if not positions or len(set(positions)) != len(positions):
+            raise ValueError("positions must be nonempty and unique.")
+        sets.append(positions)
+    positions_a, positions_b = sets
+    if set(positions_a) == set(positions_b) or not set(positions_a).intersection(positions_b):
+        raise ValueError("Select distinct position sets with at least one shared position.")
+    union = list(dict.fromkeys(positions_a + positions_b))
+    info = hladat.AA.info
+    annotations = {}
+    for variant in union:
+        rows = info.loc[info["AA_ID"].eq(variant)]
+        if rows.empty or str(variant).startswith("MOTIF_"):
+            raise ValueError(f"Invalid AA position: {variant}")
+        labels = rows[["GENE", "AA_POS"]].drop_duplicates()
+        if len(labels) != 1:
+            raise ValueError(f"Ambiguous AA position: {variant}")
+        annotations[variant] = tuple(labels.iloc[0].astype(str))
+
+    genes = {gene for gene, _ in annotations.values()}
+    if len(genes) != 1:
+        raise ValueError("Motif comparison requires positions within one gene.")
+    if len(set(annotations.values())) != len(union):
+        raise ValueError("Variant IDs must identify distinct AA positions.")
+    gene = next(iter(genes))
+    phenotype = prepare_y(famfile, y=y)
+    covdf = prepare_covar(covar, phenotype.index)
+    covar_cols = list(covdf) if covdf is not None else []
+    builder = _choose_motif_builder(hladat, reference, phenotype.index)
+    groups = [positions_a, positions_b, union]
+    frames = [_build_motifs(builder, gene, [annotations[v][1] for v in group], phenotype.index)
+              for group in groups]
+
+    a, b, joint = frames
+    if len(a.columns) < 2 or len(b.columns) < 2:
+        raise ValueError("Selected positions have insufficient motif variation.")
+
+    # A shared joint reference keeps both reduced models nested with partial dosages.
+    parents = [_expanded_motif_parents(frame, joint) for frame in (a, b)]
+    issue = ""
+    if joint.empty or any(parent is None for parent in parents):
+        issue = "combined motif groups do not refine both alternatives"
+        for frame in frames:
+            frame.attrs["reference"] = frame.sum().idxmax() if len(frame.columns) else None
+    else:
+        ref = joint.sum().idxmax()
+        joint.attrs["reference"] = ref
+        a.attrs["reference"], b.attrs["reference"] = [parent[ref] for parent in parents]
+    blocks = [_motif_genotype(frame, prefix)[0]
+              for frame, prefix in zip(frames, ("MOTIF_A", "MOTIF_B", "MOTIF_AB"))]
+    predictors = pd.concat(blocks, axis=1)
+    if set(covar_cols).intersection(["Y", *predictors.columns]):
+        raise ValueError("Covariates conflict with reserved motif columns.")
+    abt, _ = make_model_table(predictors, phenotype, covdf)
+    if abt.empty:
+        raise ValueError("No complete-case samples.")
+    if not issue:
+        # Check actual dosages: group labels alone cannot establish valid nesting.
+        for frame, parent_map in zip((a, b), parents):
+            for parent in frame:
+                children = [child for child, old in parent_map.items() if old == parent]
+                recovered = joint.loc[abt.index, children].sum(axis=1)
+                if not np.allclose(recovered, frame.loc[abt.index, parent], rtol=1e-8, atol=1e-8):
+                    issue = "combined dosages do not reconstruct both alternative motif groups"
+                    break
+    result = fit_motif_comparison(abt, *[list(block) for block in blocks],
+                                  covar_cols, config.model_type,
+                                  min_delta_bic=min_delta_bic, joint_issue=issue)
+    return pd.DataFrame([{
+        "POSITIONS_A": ";".join(positions_a), "POSITIONS_B": ";".join(positions_b),
+        "POSITIONS_AB": ";".join(union), "GENE": gene,
+        "N_MOTIFS_A": len(a.columns), "N_MOTIFS_B": len(b.columns),
+        "N_MOTIFS_AB": len(joint.columns), **result,
+    }])

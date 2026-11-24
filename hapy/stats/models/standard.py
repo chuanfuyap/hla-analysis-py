@@ -232,13 +232,37 @@ def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_
     """Compare two groups of amino acid predictors using BIC and conditional tests.
 
     Models:
-      A:  Y ~ covars + a_cols...
-      B:  Y ~ covars + b_cols...
-      AB: Y ~ covars + a_cols... + b_cols...
+      A:  Y ~ covars + a_cols... (e.g. pos11)
+      B:  Y ~ covars + b_cols... (e.g. pos13)
+      AB: Y ~ covars + a_cols... + b_cols... (e.g. pos11 + pos13)
 
     Fit A, B and A+B with shared covariates and complete-case samples.
     Return BIC, reciprocal conditional tests, a recommendation and INFO.
     """
+    return _fit_comparison(abt, a_cols, b_cols, a_cols + b_cols, covar_cols,
+                           model_type, min_delta_bic=min_delta_bic)
+
+
+def fit_motif_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
+                         *, min_delta_bic=2.0, joint_issue=""):
+    """Compare alternative motifs against their combined position motif.
+
+    Models:
+      A:  Y ~ covars + a_cols... (e.g. pos11-71)
+      B:  Y ~ covars + b_cols... (e.g. pos11-74)
+      AB: Y ~ covars + joint_cols... (e.g. pos11-71-74)
+
+    Return BIC, reciprocal conditional tests, a recommendation and INFO.
+    All models use identical complete-case samples.
+    """
+    return _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols,
+                           model_type, min_delta_bic=min_delta_bic,
+                           check_nested=True, joint_issue=joint_issue)
+
+
+def _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
+                    *, min_delta_bic, check_nested=False, joint_issue=""):
+    """Fit and summarise three models using one sample set."""
     if model_type not in ("linear", "logit"):
         raise ValueError("model_type must be 'linear' or 'logit'.")
     if not np.isfinite(min_delta_bic) or min_delta_bic < 0:
@@ -252,7 +276,8 @@ def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_
         raise ValueError("Model columns must be unique and predictor groups must not overlap.")
 
     # Drop missing rows once so every comparison uses identical samples.
-    abt = abt.loc[:, columns].dropna()
+    extra = [c for c in joint_cols if c not in columns]
+    abt = abt.loc[:, columns + extra].dropna()
     n = len(abt)
     if n == 0:
         raise ValueError("No complete-case samples.")
@@ -268,14 +293,16 @@ def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_
     formulas = {
         "A": formula(cov_terms + a_terms),
         "B": formula(cov_terms + b_terms),
-        "AB": formula(cov_terms + a_terms + b_terms),
+        "AB": formula(cov_terms + _cov_terms(abt, joint_cols)),
     }
 
     # Fit models
     models = {}
-    joint_issue = ""
 
     for label, f in formulas.items():
+        if label == "AB" and joint_issue:
+            models[label] = None
+            continue
         try:
             model = _fit(f, abt, model_type)
 
@@ -288,6 +315,13 @@ def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_
             if info:
                 raise ValueError(info)
 
+            if label == "AB" and check_nested:
+                # Conditional tests require both alternative design spaces to be nested.
+                for reduced in models.values():
+                    design = reduced.model.exog
+                    recovered = exog @ np.linalg.lstsq(exog, design, rcond=None)[0]
+                    if not np.allclose(recovered, design, rtol=1e-8, atol=1e-8):
+                        raise ValueError("combined motif model does not contain both alternatives")
             models[label] = model
 
         except (ValueError, np.linalg.LinAlgError, PerfectSeparationError) as exc:

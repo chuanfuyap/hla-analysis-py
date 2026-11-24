@@ -11,7 +11,7 @@ This module exports configs and filter utilities.
 
 from .api import analyse, analyse_many, interaction, survival
 from .stepwise import stepwise
-from .compare import compare_positions
+from .compare import compare_positions, compare_positions_motif
 from .ld import LD
 from .types import StandardConfig, InteractionConfig, SurvivalConfig
 from . import filters as filters
@@ -20,6 +20,7 @@ __all__ = [
     "analyse",
     "stepwise",
     "compare_positions",
+    "compare_positions_motif",
     "LD",
     "analyse_many",
     "interaction",
