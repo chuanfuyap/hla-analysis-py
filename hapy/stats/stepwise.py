@@ -498,13 +498,14 @@ def _clean_stepwise_output(dataframe):
     """Keep stepwise results concise, with selection fields first and counts last."""
     df = dataframe.drop(columns=[
         "COND_KIND", "N_COND_VARIANTS", "AA_ID", "POS", "alleleA", "alleleB",
+        "N_missing_Y", "N_dropped_other",
         "N_REDUCED_MOTIFS", "N_EXPANDED_MOTIFS",
     ], errors="ignore")
     if df.empty:
         return df
 
     # Zero counts add no information; zero statistics and selection flags still do.
-    counts = ["N_missing_Y", "N_dropped_other", "N_case", "N_control"]
+    counts = ["N_case", "N_control"]
     df = df.drop(columns=[c for c in counts if c in df and df[c].eq(0).all()])
     if "COND_VARIANTS" in df and df["COND_VARIANTS"].fillna("").eq("").all():
         df = df.drop(columns="COND_VARIANTS")
