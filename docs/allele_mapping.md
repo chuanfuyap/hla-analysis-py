@@ -369,28 +369,6 @@ By default, `max_genes=1` restricts motif selection to one HLA gene. Increasing 
 
 To continue the analysis, pass `condition_on=result.attrs["condition_on"]` to a new call. Selected genes remain fixed, while the last gene resumes selection. Per-gene results and stopping reasons are available in `result.attrs["selected_positions"]` and `result.attrs["gene_stop_reasons"]`.
 
-### Amino acid linkage disequilibrium (LD)
-
-```python
-# Using mapped AA data with retained allele mapping
-ld = hp.stats.LD(hladat, gene="DRB1", positions=[11, 13, 71, 96])
-
-# Using HLA allele dosages with a reference
-ld = hp.stats.LD(hladat, gene="DRB1", reference=reference)
-```
-
-`hp.stats.LD()` calculates within-gene amino acid linkage disequilibrium using **Cramér's V (Wn)**, following [Thomson and Single (2014)](https://doi.org/10.1534/genetics.114.165266).
-
-The function returns a symmetric correlation-like matrix, with values ranging from 0 (no association) to 1 (complete association). For biallelic positions, Cramér's V corresponds to the absolute haplotypic Pearson correlation.
-
-LD is calculated from **HLA allele frequencies rather than sample-level amino acid dosage correlations**. Omit `positions` to include all available positions.
-
-Monomorphic positions are excluded, and missing or ambiguous amino acids are omitted from the relevant pairwise calculations. Known alignment gaps are retained. Undefined LD values are reported as `NaN`.
-
-Mapping coverage can be inspected through `ld.attrs["mapping_coverage"]` and `ld.attrs["allele_frequency_coverage"]`. AA data without a retained allele mapping cannot be used to calculate haplotypic LD.
-
-No P-values are returned.
-
 ## Parameters
 
 ### `build_hla_reference()`
@@ -445,12 +423,3 @@ Users must download the data and build their references locally.
 
 When publishing, cite the [IPD-IMGT/HLA database](https://www.ebi.ac.uk/ipd/imgt/hla/) and the 
 relevant Ensembl annotation resource. Record the IPD release and `hapy` version to support reproducibility.
-LD also supports insertion positions, for example `positions=[25, "25i1", 26]`.
-Positions are ordered `25`, `25i1`, `25i2`, ..., `25i10`, `26`. Insertion
-labels remain strings; ordinary residue position labels remain integers.
-
-LD does not require dosage totals to equal two per sample. Supplied allele
-weights are normalised across the cohort and within each mapped position
-pair. Samples are not excluded for exceeding two copies;
-`allele_frequency_coverage` can consequently exceed one. Negative and
-infinite dosages remain invalid.

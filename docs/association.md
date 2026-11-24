@@ -423,3 +423,42 @@ continued = hp.stats.stepwise(
 ```
 
 This continues selection using the previously selected positions as the initial motif model. `max_steps` limits newly selected positions, excluding initial conditions.
+
+### Amino acid linkage disequilibrium (LD)
+
+`hp.stats.LD()` calculates LD between amino acid positions using two methods:
+
+- **Canonical correlation analysis (CCA, default):** Measures association between residue dosages without requiring phased data. Supports both hard calls and fractional imputed dosages.
+- **Cramér's V (Wn):** Measures haplotypic association using HLA allele frequencies and mapped amino acids. Requires allele mapping or HLA allele dosages with a reference.
+
+```python
+# Selected positions within one gene
+ld = hp.stats.LD(hladat, gene="DRB1", positions=[11, 13, 71, 96])
+
+# All positions across multiple genes
+ld = hp.stats.LD(hladat, gene=["A", "B", "C", "DRB1", "DQA1", "DQB1"])
+
+# Haplotype-based Cramér's V
+ld = hp.stats.LD(hladat, gene="DRB1", method="cramer")
+
+# Cramér's V using HLA allele dosages and a reference
+ld = hp.stats.LD(hladat, gene="DRB1", method="cramer", reference=reference)
+```
+
+**CCA** summarises canonical correlations between residue dosages as `sqrt(mean(rho**2))`. For biallelic positions, this is equivalent to absolute Pearson correlation. It supports comparisons across different HLA genes.
+
+**Cramér's V** calculates within-gene LD from HLA allele frequencies rather than individual-level dosage correlations. Missing or ambiguous residues are excluded, while known alignment gaps are retained.
+
+Both methods return a symmetric pandas DataFrame with values between 0 (no association) and 1 (complete association). Omit `positions` to include all available positions. Insertion positions such as `"25i1"` are also supported.
+
+Monomorphic positions are excluded, and undefined comparisons return `NaN`. No P-values are reported.
+
+**Additional information:**
+
+- CCA sample counts: `ld.attrs["N_used"]`
+- Cramér's V mapping coverage: `ld.attrs["mapping_coverage"]`
+- Cramér's V allele frequency coverage: `ld.attrs["allele_frequency_coverage"]`
+
+For canonical correlation analysis (CCA), see [Hotelling (1936)](https://doi.org/10.1093/biomet/28.3-4.321).
+
+For Cramér's V, see [Thomson and Single (2014)](https://doi.org/10.1534/genetics.114.165266).

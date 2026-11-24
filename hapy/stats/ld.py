@@ -1,9 +1,10 @@
-"""Within-gene multiallelic amino-acid linkage disequilibrium."""
+"""Multiallelic amino-acid linkage disequilibrium."""
 from itertools import combinations
 import re
 
 import numpy as np
 import pandas as pd
+from scipy.linalg import svd
 from scipy.stats.contingency import association, chi2_contingency
 
 from ..data.hla_reference import _normalise_gene
@@ -60,7 +61,7 @@ def _position_key(position):
     return int(match[1]), int(match[2] or 0)
 
 
-def LD(hladat, gene, positions=None, reference=None):
+def _ld_cramer(hladat, gene, positions=None, reference=None):
     """Calculate within-gene amino acid LD using Cramer's V (Wn).
 
     Parameters
@@ -144,3 +145,141 @@ def LD(hladat, gene, positions=None, reference=None):
     result.attrs.update(gene=gene, method="cramer", allele_frequency_coverage=allele_coverage,
                         mapping_coverage=pd.DataFrame(coverage, index=index, columns=index.copy()))
     return result
+
+
+def _dosage_basis(values):
+    """Return an orthonormal basis for centred residue dosages."""
+    if len(values) < 2 or values.shape[1] == 0:
+        return np.empty((len(values), 0))
+    centred = values - values.mean(axis=0)
+    u, singular, _ = svd(centred, full_matrices=False)
+    # Remove the sum-to-two dependency and any other numerical zero components.
+    tolerance = np.finfo(float).eps * max(centred.shape) * max(1.0, singular[0])
+    return u[:, singular > tolerance]
+
+
+def _ld_cca(hladat, gene, positions):
+    """Calculate pairwise dosage LD, reusing bases for shared sample sets."""
+    from ..data.hla_mapping import read_aa_dosage
+    from .preprocess import sample_index
+
+    if isinstance(hladat, pd.DataFrame):
+        hladat = read_aa_dosage(hladat)
+    if not hasattr(hladat, "AA"):
+        raise ValueError("CCA LD requires AA dosages or hard calls.")
+    genes = [_normalise_gene(gene)] if isinstance(gene, str) else [_normalise_gene(g) for g in gene]
+    if not genes or len(set(genes)) != len(genes):
+        raise ValueError("gene must contain unique HLA genes.")
+    info, raw = hladat.AA.info, hladat.AA.data
+    if not raw.columns.is_unique:
+        raise ValueError("AA sample columns must be unique.")
+    if hladat.type == "softcall":
+        samples = sample_index(raw.columns, source="AA dosages")
+    else:
+        # Reuse complete Beagle sample pairs without stripping dots from IIDs.
+        from .adapters._samples import genotype_sample_ids
+        candidates = pd.Index(raw.columns).astype(str)
+        samples = genotype_sample_ids(raw, candidates, hladat.type)
+    if positions is not None:
+        if isinstance(positions, (str, bytes)) or np.isscalar(positions):
+            raise ValueError("positions must be a sequence of unique AA positions.")
+        positions = [str(pos) for pos in positions]
+        if not positions or len(set(positions)) != len(positions):
+            raise ValueError("positions must be a nonempty sequence of unique AA positions.")
+    matrices = {}
+    for g in genes:
+        selected = info["GENE"].map(_normalise_gene).eq(g) & ~info["AA_ID"].astype(str).str.startswith("MOTIF_")
+        available = set(info.loc[selected, "AA_POS"].astype(str))
+        if not available:
+            raise ValueError(f"{g}: no AA positions available.")
+        if positions is not None and set(positions).difference(available):
+            raise ValueError(f"Unknown {g} AA positions: {sorted(set(positions).difference(available))}")
+        for pos in sorted(available if positions is None else positions, key=_position_key):
+            mask = selected & info["AA_POS"].astype(str).eq(pos)
+            block = raw.iloc[np.flatnonzero(mask)]
+            if hladat.type == "softcall":
+                # Use residue dosages directly, without association frequency filters.
+                values = block.to_numpy(dtype=float).T
+            else:
+                first = block.loc[:, samples].T.to_numpy()
+                second = block.loc[:, samples + ".1"].T.to_numpy()
+                present = ["P", "p", "T"]
+                known = present + ["A", "a"]
+                complete = np.isin(first, known).all(axis=1) & np.isin(second, known).all(axis=1)
+                values = np.isin(first, present).astype(float) + np.isin(second, present)
+                values[~complete] = np.nan
+            if np.isinf(values).any() or (values < 0).any():
+                raise ValueError("AA dosages must be finite and nonnegative, or missing.")
+            matrices[g, pos] = values
+
+    bases = {}
+    def basis(key, mask):
+        cache_key = (key, mask.tobytes())
+        if cache_key not in bases:
+            bases[cache_key] = _dosage_basis(matrices[key][mask])
+        return bases[cache_key]
+
+    valid = {key: np.isfinite(value).all(axis=1) for key, value in matrices.items()}
+    labels = [key for key in matrices if basis(key, valid[key]).shape[1] > 0]
+    values = np.eye(len(labels))
+    counts = np.zeros((len(labels), len(labels)), dtype=int)
+    for i, key in enumerate(labels):
+        counts[i, i] = valid[key].sum()
+    for i, j in combinations(range(len(labels)), 2):
+        a, b = labels[i], labels[j]
+        mask = valid[a] & valid[b]
+        counts[i, j] = counts[j, i] = mask.sum()
+        left, right = basis(a, mask), basis(b, mask)
+        value = np.nan
+        if left.shape[1] and right.shape[1]:
+            rho = np.clip(svd(left.T @ right, compute_uv=False), 0, 1)
+            value = float(np.sqrt(np.mean(rho ** 2)))
+        values[i, j] = values[j, i] = value
+    if len(genes) == 1:
+        index = pd.Index([p if "i" in p else int(p) for _, p in labels], name="AA_POS")
+    else:
+        index = pd.MultiIndex.from_tuples([(g, p if "i" in p else int(p)) for g, p in labels], names=["GENE", "AA_POS"])
+    result = pd.DataFrame(values, index=index, columns=index.copy())
+    result.attrs.update(method="cca", gene=genes[0] if len(genes) == 1 else genes,
+                        N_used=pd.DataFrame(counts, index=index, columns=index.copy()))
+    return result
+
+
+def LD(hladat, gene, positions=None, reference=None, method="cca"):
+    """Calculate amino acid linkage disequilibrium using CCA or Cramer's V.
+
+    Parameters
+    ----------
+    hladat : HLAdata or pandas.DataFrame
+        AA hard calls or residue dosages, with samples as rows for DataFrames.
+    gene : str or sequence of str
+        HLA gene or genes to compare. Multiple genes require "cca".
+    positions : iterable of int or str, optional
+        AA positions to include. Defaults to all available positions.
+    reference : HLAReference or path, optional
+        Required for Cramer's V when no allele mapping is available.
+    method : {"cca", "cramer"}, default "cca"
+        CCA uses residue dosages; Cramer's V uses HLA allele frequencies.
+
+    Returns
+    -------
+    pandas.DataFrame
+        Symmetric LD matrix ordered by gene and AA position.
+        Multiple genes use a (GENE, AA_POS) index. Monomorphic positions
+        are excluded. Sample counts and coverage are stored in ``attrs``.
+
+    Notes
+    -----
+    CCA measures dosage-based association without requiring phased data,
+    using sqrt(mean(rho**2)) of the canonical correlations.
+    Cramer's V measures haplotypic association within a gene.
+    Missing data are excluded pairwise, and undefined values are NaN.
+    No P-values are returned.
+    """
+    if method == "cca":
+        return _ld_cca(hladat, gene, positions)
+    if method == "cramer":
+        if not isinstance(gene, str):
+            raise ValueError("Cramer's V requires a single gene.")
+        return _ld_cramer(hladat, gene, positions, reference)
+    raise ValueError("method must be 'cca' or 'cramer'.")
