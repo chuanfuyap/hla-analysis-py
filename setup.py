@@ -25,7 +25,7 @@ def get_version(rel_path: str) -> str:
 
 setup(name="hla-hapy",
       version=get_version("hapy/__init__.py"),
-      description='Tools to haplotype analysis for genomics studies.',
+      description='Tools to HLA analysis in genomics studies.',
       author='Chuan Fu Yap',
       author_email='yapchuanfu@gmail.com',
       license='GNU GPLv3',
@@ -46,4 +46,16 @@ setup(name="hla-hapy",
     ],
     long_description=read("README.md"),
     long_description_content_type="text/markdown",
+    url="https://github.com/chuanfuyap/haplo-analysis-py",
+        project_urls={
+            "Issues": "https://github.com/chuanfuyap/haplo-analysis-py/issues",
+        },
+        license_files=["LICENSE"],
+        classifiers=[
+            "Development Status :: 5 - Production/Stable",
+            "Intended Audience :: Science/Research",
+            "Topic :: Scientific/Engineering :: Bio-Informatics",
+            "Programming Language :: Python :: 3",
+            "Programming Language :: Python :: 3.11",
+        ],
 )

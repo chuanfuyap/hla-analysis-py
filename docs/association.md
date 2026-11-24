@@ -320,6 +320,30 @@ For biallelic positions, the existing SINGLE test already evaluates one residue,
 
 OVR rows use Ref_AA="tested: S" to identify the tested residue.
 
+### Testing a specified amino acid motif (haplotype)
+
+Use AA variant IDs to test a fixed motif or add one position to an existing motif.
+Both functions accept retained allele mapping or HLA dosages with a reference.
+
+```python
+motif_test = hp.stats.analyse_motif(
+    hladat, config, positions=['AA_DRB1_11_32552129', 'AA_DRB1_71_32551949'],
+    y=phenotype, covar=covariates, reference=reference,
+)
+
+expansion_test = hp.stats.expand_motif(
+    hladat, config, positions=['AA_DRB1_11_32552129',], add_position='AA_DRB1_71_32551949',
+    y=phenotype, covar=covariates, reference=reference,
+)
+```
+
+`analyse_motif()` compares the specified motif against covariates alone.
+`expand_motif()` compares the expanded motif against the existing motif, with
+covariates in both models. Each returns one row with a likelihood-ratio test,
+motif coefficients, sample counts and `INFO` for unusable fits. Neither function
+searches for positions. The reference is kept consistent as positions are added in the supplied order.
+
+
 ## Position-based stepwise conditional analysis
 
 hp.stats.stepwise() performs stepwise conditional association analysis of amino acid positions. It identifies the most significant position, adds it to the conditioning list, and repeats the analysis until no further positions meet the significance threshold.

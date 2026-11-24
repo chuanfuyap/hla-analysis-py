@@ -179,7 +179,7 @@ def fit_motif_omnibus(abt: pd.DataFrame, reduced_cols: list[str], expanded_cols:
     Alt:
       Y ~ covars + expanded_cols... (e.g. VRK motif)
 
-    Both models use identical complete-case samples. The stepwise builder
+    Both models use identical complete-case samples. The motif builder
     verifies that expanded groups reconstruct the existing groups and drops
     a compatible reference. Additional rank checking is optional.
     """

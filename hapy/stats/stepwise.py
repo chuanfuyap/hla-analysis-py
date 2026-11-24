@@ -8,17 +8,18 @@ import time
 import numpy as np
 import pandas as pd
 
-from .adapters.aa import AAAdapter, aa_frequency
+from .adapters.aa import AAAdapter
 from .preprocess import prepare_y, prepare_covar, make_model_table
 from .parallel import parallel_imap_batched
 from .progress import ProgressPrinter
-from statsmodels.tools.sm_exceptions import PerfectSeparationError
 from .runners.standard_runner import (
     run_standard, _normalize_condition_on, _validate_conditioning_variants, _prepare_shared_null,
+    _clean_output,
 )
 from .types import StandardConfig
+from .motif import expand_motif
 from ._motif import (_choose_motif_builder, _build_motifs,
-                     _expanded_motif_parents, _motif_genotype)
+                     _motif_genotype, _initial_motifs)
 
 
 def _position_filter(ctx, *, eligible, user_filter):
@@ -149,7 +150,7 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         position_noun = "position" if selected == 1 else "positions"
         print("Analysis complete", flush=True)
         print(f"{scans} {scan_noun} | {selected} selected {position_noun} | Total: {elapsed:.1f}s", flush=True)
-    return out
+    return _clean_stepwise_output(out)
 
 
 def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
@@ -226,60 +227,15 @@ def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
 def _motif_candidate(variant, *, builder, gene, positions, annotations, old_motifs,
                      y, covar, conditions, model_type, null_cache, check_rank, variant_filter):
     """Build and test one expansion; return its row and matrix for winner reuse."""
-    from .models.standard import fit_motif_omnibus
-
-    position = annotations[variant]["position"]
-    new_motifs = _build_motifs(builder, gene, positions + [position], y.index)
-    row = dict(annotations[variant]["meta"], VARIANT=variant, GENE=gene, AA_POS=position,
-               COND_KIND="AA", COND_VARIANTS=";".join(conditions),
-               N_COND_VARIANTS=len(conditions), TEST="MOTIF", **{"P-value": np.nan},
-               MOTIF_POSITIONS=";".join(positions + [position]),
-               N_REDUCED_MOTIFS=len(old_motifs.columns), N_EXPANDED_MOTIFS=len(new_motifs.columns))
-    row.update(Amino_Acids=", ".join(str(c) for c in new_motifs.columns),
-               AAcount=len(new_motifs.columns), AA_AF=np.nan, Ref_AA=np.nan)
-    parents = _expanded_motif_parents(old_motifs, new_motifs)
-    if parents is None:
-        return dict(row, INFO="expanded motif groups do not refine the existing groups"), None
-    children = [c for c, parent in parents.items() if parent == old_motifs.attrs["reference"]]
-    if not children:
-        return dict(row, INFO="no observed child of the reduced reference motif"), None
-    # Keeping the reference in the same lineage preserves nesting with partial dosages.
-    new_motifs.attrs["reference"] = new_motifs[children].sum().idxmax()
-    row["Ref_AA"] = new_motifs.attrs["reference"]
-    reduced, _ = _motif_genotype(old_motifs, "MOTIF_R")
-    expanded, labels = _motif_genotype(new_motifs, "MOTIF_F")
-    ctx = dict(analysis="standard", kind="AA", variant_id=variant,
-               meta=annotations[variant]["meta"], geno_cols=list(expanded))
-    if variant_filter is not None and not variant_filter(ctx):
-        return dict(row, INFO="excluded by variant filter"), None
-    predictors = pd.concat([reduced, expanded], axis=1)
-    if covar is not None and not predictors.columns.intersection(covar.columns).empty:
-        raise ValueError("Covariate names collide with internal motif column names.")
-    abt, qc = make_model_table(predictors, y, covar)
-    row.update(qc)
-    row["AA_AF"] = aa_frequency(new_motifs, abt.index)
-    if abt.empty:
-        return dict(row, INFO="no complete-case samples"), None
-    # Verify dosages, not just labels: incomplete mappings may lose a parent contribution.
-    for parent in old_motifs:
-        children = [c for c, p in parents.items() if p == parent]
-        recovered = new_motifs.loc[abt.index, children].sum(axis=1)
-        if not np.allclose(recovered, old_motifs.loc[abt.index, parent], rtol=1e-8, atol=1e-8):
-            return dict(row, INFO="expanded dosages do not reconstruct existing motif groups"), None
-    try:
-        row.update(fit_motif_omnibus(abt, list(reduced), list(expanded),
-            list(covar) if covar is not None else [], model_type,
-            null_cache=null_cache, check_rank=check_rank, term_labels=labels))
-    except (PerfectSeparationError, np.linalg.LinAlgError, FloatingPointError,
-            OverflowError, ZeroDivisionError) as exc:
-        row["INFO"] = f"numerical fit failure: {type(exc).__name__}: {exc}"
-    except ValueError as exc:
-        if not any(message in str(exc).lower() for message in (
-                "first guess on the deviance function returned a nan",
-                "nan, inf or invalid value detected in weights")):
-            raise
-        row["INFO"] = f"numerical fit failure: ValueError: {exc}"
-    return row, new_motifs
+    prepared = dict(builder=builder, gene=gene, positions=positions,
+                    position=annotations[variant]["position"],
+                    meta=annotations[variant]["meta"], old_motifs=old_motifs,
+                    null_cache=null_cache, variant_filter=variant_filter)
+    row, motifs = expand_motif(
+        None, StandardConfig(model_type), conditions, variant,
+        y=y, covar=covar, check_rank=check_rank, _prepared=prepared,
+    )
+    return {**annotations[variant]["meta"], **row}, motifs
 
 
 def _valid_motif_result(row):
@@ -319,25 +275,8 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
     positions = [annotations[v]["position"] for v in conditions]
     if len(set(positions)) != len(positions):
         raise ValueError("Motif condition_on contains duplicate AA positions.")
-    old_motifs = None
-    # Reconstruct the same reference lineage when continuing a previous search.
-    # Only prefixes of the supplied conditions are built; no selection scans run.
-    for length in range(1, len(positions) + 1):
-        motifs = _build_motifs(builder, gene, positions[:length], phenotype.index)
-        if len(motifs.columns) < 2:
-            raise ValueError("Selected positions have insufficient motif variation.")
-        if old_motifs is None:
-            reference_motif = motifs.sum().idxmax()
-        else:
-            parents = _expanded_motif_parents(old_motifs, motifs)
-            children = [] if parents is None else [c for c, parent in parents.items()
-                if parent == old_motifs.attrs["reference"]]
-            if not children:
-                raise ValueError("Initial motif conditions do not define a consistent reference lineage.")
-            reference_motif = motifs[children].sum().idxmax()
-        motifs.attrs["reference"] = reference_motif
-        old_motifs = motifs
-    
+    old_motifs = _initial_motifs(builder, gene, positions, phenotype.index)
+
     if rows:
         rows[0].update(MOTIF_POSITIONS=";".join(positions), N_REDUCED_MOTIFS=0,
                        N_EXPANDED_MOTIFS=len(old_motifs.columns))
@@ -553,3 +492,33 @@ def _multi_gene_motif(hladat, config, phenotype, covariates, eligible, condition
         selected_positions=gene_positions, gene_stop_reasons=gene_stops,
         genes=completed, max_genes=max_genes)
     return out
+
+
+def _clean_stepwise_output(dataframe):
+    """Keep stepwise results concise, with selection fields first and counts last."""
+    df = dataframe.drop(columns=[
+        "COND_KIND", "N_COND_VARIANTS", "AA_ID", "POS", "alleleA", "alleleB",
+        "N_REDUCED_MOTIFS", "N_EXPANDED_MOTIFS",
+    ], errors="ignore")
+    if df.empty:
+        return df
+
+    # Zero counts add no information; zero statistics and selection flags still do.
+    counts = ["N_missing_Y", "N_dropped_other", "N_case", "N_control"]
+    df = df.drop(columns=[c for c in counts if c in df and df[c].eq(0).all()])
+    if "COND_VARIANTS" in df and df["COND_VARIANTS"].fillna("").eq("").all():
+        df = df.drop(columns="COND_VARIANTS")
+    df = _clean_output(df)
+
+    first = [
+        "STEP", "SELECTED", "VARIANT", "GENE", "AA_POS", "MOTIF_POSITIONS",
+        "COND_VARIANTS", "Amino_Acids", "Ref_AA", "AAcount", "AA_AF",
+        "TEST", "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF",
+    ]
+    last = ["N_used", "N_case", "N_control", "INFO"]
+    first = [c for c in first if c in df]
+    last = [c for c in last if c in df]
+    middle = [c for c in df if c not in first + last]
+    result = df[first + middle + last]
+    result.attrs = dataframe.attrs.copy()
+    return result

@@ -69,3 +69,26 @@ def _motif_genotype(frame, prefix):
     return geno, {names[c]: c for c in columns}
 
 
+def _initial_motifs(builder, gene, positions, index):
+    """Build a starting motif, keeping the reference consistent as positions are added."""
+    old_motifs = None
+    # Keep the same reference choices when continuing a previous search.
+    # Only prefixes of the supplied conditions are built; no selection scans run.
+    for length in range(1, len(positions) + 1):
+        motifs = _build_motifs(builder, gene, positions[:length], index)
+        if len(motifs.columns) < 2:
+            raise ValueError("Selected positions have insufficient motif variation.")
+        if old_motifs is None:
+            reference_motif = motifs.sum().idxmax()
+        else:
+            parents = _expanded_motif_parents(old_motifs, motifs)
+            children = [] if parents is None else [c for c, parent in parents.items()
+                if parent == old_motifs.attrs["reference"]]
+            if not children:
+                raise ValueError("Cannot keep the reference consistent across the supplied motif positions.")
+            reference_motif = motifs[children].sum().idxmax()
+        motifs.attrs["reference"] = reference_motif
+        old_motifs = motifs
+
+    return old_motifs
+
