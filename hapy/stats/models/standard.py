@@ -16,6 +16,7 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 import statsmodels.formula.api as smf
+from statsmodels.tools.sm_exceptions import PerfectSeparationError
 
 from .common import lrtest, anova, categorical_term, _fit_info
 from ._null import null_summary
@@ -38,10 +39,6 @@ def _cov_terms(abt: pd.DataFrame, covar_cols: list[str]) -> list[str]:
 def fit_univariate(abt: pd.DataFrame, geno_col: str, covar_cols: list[str], model_type: str, *, _return_model=False) -> dict:
     """
     Fit a univariate association model and return p/coef/CI and INFO.
-
-    If convergence or finiteness checks fail, return TEST and INFO only.
-    The private _return_model option keeps the fitted object inside the worker
-    for validated reverse contrasts; the default returns the existing dict.
 
     Model:
       Y ~ covars + geno_col
@@ -177,6 +174,11 @@ def fit_motif_omnibus(abt: pd.DataFrame, reduced_cols: list[str], expanded_cols:
                       check_rank: bool = False, term_labels=None) -> dict:
     """Compare covariates + expanded motifs against covariates + existing motifs.
 
+    Null:
+      Y ~ covars + reduced_cols... (e.g. VR motif)
+    Alt:
+      Y ~ covars + expanded_cols... (e.g. VRK motif)
+
     Both models use identical complete-case samples. The stepwise builder
     verifies that expanded groups reconstruct the existing groups and drops
     a compatible reference. Additional rank checking is optional.
@@ -223,4 +225,140 @@ def fit_motif_omnibus(abt: pd.DataFrame, reduced_cols: list[str], expanded_cols:
         "DoF": int(dof), "TEST": "MOTIF", "INFO": np.nan,
         "Beta": ";".join(f"{labels.get(c, c)}={alt.params[t]:.12g}" for c, t in zip(expanded_cols, expanded_terms)),
         "StdErr": ";".join(f"{labels.get(c, c)}={alt.bse[t]:.12g}" for c, t in zip(expanded_cols, expanded_terms)),
+    }
+
+
+def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_delta_bic=2.0):
+    """Compare two groups of amino acid predictors using BIC and conditional tests.
+
+    Models:
+      A:  Y ~ covars + a_cols...
+      B:  Y ~ covars + b_cols...
+      AB: Y ~ covars + a_cols... + b_cols...
+
+    Fit A, B and A+B with shared covariates and complete-case samples.
+    Return BIC, reciprocal conditional tests, a recommendation and INFO.
+    """
+    if model_type not in ("linear", "logit"):
+        raise ValueError("model_type must be 'linear' or 'logit'.")
+    if not np.isfinite(min_delta_bic) or min_delta_bic < 0:
+        raise ValueError("min_delta_bic must be finite and nonnegative.")
+    if not a_cols or not b_cols:
+        raise ValueError("No eligible residue predictors.")
+
+    # Separate predictor groups prevent accidental conditioning on a tested column.
+    columns = ["Y", *covar_cols, *a_cols, *b_cols]
+    if len(set(columns)) != len(columns) or not abt.columns.is_unique:
+        raise ValueError("Model columns must be unique and predictor groups must not overlap.")
+
+    # Drop missing rows once so every comparison uses identical samples.
+    abt = abt.loc[:, columns].dropna()
+    n = len(abt)
+    if n == 0:
+        raise ValueError("No complete-case samples.")
+
+    # Construct model formulas
+    cov_terms = _cov_terms(abt, covar_cols)
+    a_terms = _cov_terms(abt, a_cols)
+    b_terms = _cov_terms(abt, b_cols)
+
+    def formula(terms):
+        return "Y ~ " + " + ".join(terms) if terms else "Y ~ 1"
+
+    formulas = {
+        "A": formula(cov_terms + a_terms),
+        "B": formula(cov_terms + b_terms),
+        "AB": formula(cov_terms + a_terms + b_terms),
+    }
+
+    # Fit models
+    models = {}
+    joint_issue = ""
+
+    for label, f in formulas.items():
+        try:
+            model = _fit(f, abt, model_type)
+
+            # Check model rank
+            exog = model.model.exog
+            if np.linalg.matrix_rank(exog) < exog.shape[1]:
+                raise ValueError("rank-deficient design matrix")
+
+            info = _fit_info(model, model_type)
+            if info:
+                raise ValueError(info)
+
+            models[label] = model
+
+        except (ValueError, np.linalg.LinAlgError, PerfectSeparationError) as exc:
+            if label != "AB":
+                raise ValueError(f"Cannot fit {label}: {exc}") from exc
+
+            # Joint model may be unidentifiable because of LD
+            models[label] = None
+            joint_issue = str(exc)
+
+    a = models["A"]
+    b = models["B"]
+    ab = models["AB"]
+
+    # Calculate BIC
+    def bic(model):
+        if model is None:
+            return np.nan
+        k = model.df_model + 1
+        return float(-2 * model.llf + k * np.log(n))
+
+    bic_a = bic(a)
+    bic_b = bic(b)
+    bic_ab = bic(ab)
+
+    # Reciprocal conditional association tests
+    p_b_given_a = np.nan
+    p_a_given_b = np.nan
+    df_b_given_a = np.nan
+    df_a_given_b = np.nan
+
+    if ab is not None:
+        df_b_given_a = int(round(ab.df_model - a.df_model))
+        df_a_given_b = int(round(ab.df_model - b.df_model))
+
+        if model_type == "linear":
+            if df_b_given_a > 0:
+                _, p_b_given_a, _ = ab.compare_f_test(a)
+            if df_a_given_b > 0:
+                _, p_a_given_b, _ = ab.compare_f_test(b)
+
+        else:
+            if df_b_given_a > 0:
+                _, p_b_given_a, _ = lrtest(a, ab)
+            if df_a_given_b > 0:
+                _, p_a_given_b, _ = lrtest(b, ab)
+
+    # Model selection
+    best_single = "A" if bic_a <= bic_b else "B"
+    best_single_bic = min(bic_a, bic_b)
+
+    delta_joint = best_single_bic - bic_ab
+
+    if np.isfinite(delta_joint) and delta_joint >= min_delta_bic:
+        recommendation = "A+B"
+    elif bic_a == bic_b or abs(bic_a - bic_b) < min_delta_bic:
+        recommendation = "A/B unresolved"
+    else:
+        recommendation = best_single
+
+    return {
+        "N_used": n,
+        "BIC_A": bic_a,
+        "BIC_B": bic_b,
+        "BIC_AB": bic_ab,
+        "Delta_BIC_B_minus_A": bic_b - bic_a,
+        "Delta_BIC_joint_improvement": delta_joint,
+        "P_B_given_A": p_b_given_a,
+        "P_A_given_B": p_a_given_b,
+        "DoF_B_given_A": df_b_given_a,
+        "DoF_A_given_B": df_a_given_b,
+        "RECOMMENDATION": recommendation,
+        "INFO": joint_issue,
     }
