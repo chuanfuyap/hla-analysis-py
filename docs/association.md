@@ -124,7 +124,7 @@ results = hp.stats.analyse(
 | `covar` | `pandas.DataFrame`, `str`, `pathlib.Path` or `None` | `None` | IID-indexed covariates, or a comma-separated CSV path with sample IDs in its first column. Read other delimiters explicitly with pandas. All supplied covariate columns enter the model. |
 | `y` | `pandas.Series`, one-dimensional array-like or `None` | `None` | Phenotype Series indexed by IID, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
 | `variant_filter` | callable or `None` | `None` | Function receiving a variant context and returning `True` to keep or `False` to exclude it. Use ID/gene filter helpers rather than a bare list. |
-| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind focal variant IDs included as adjustment terms. Conditioning variants are excluded from focal testing. For AA, use position IDs without residue suffixes. |
+| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind variant IDs included as adjustment terms. Conditioning variants are excluded from testing. For AA, use position IDs without residue suffixes. |
 | `residue` | `bool` | `False` | For `kind="AA"`, retain position-level results and append residue OVR tests, including an available QC-passing reference dosage. |
 | `verbose` | `bool` | `True` | Print execution settings, task counts, progress and timing. |
 | `use_progress_bar` | `bool` | `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
@@ -343,112 +343,7 @@ covariates in both models. Each returns one row with a likelihood-ratio test,
 motif coefficients, sample counts and `INFO` for unusable fits. Neither function
 searches for positions. The reference is kept consistent as positions are added in the supplied order.
 
-
-## Position-based stepwise conditional analysis
-
-hp.stats.stepwise() performs stepwise conditional association analysis of amino acid positions. It identifies the most significant position, adds it to the conditioning list, and repeats the analysis until no further positions meet the significance threshold.
-
-```python
-winners = hp.stats.stepwise(
-    hladat=hladat,
-    config=cfg,                 # StandardConfig: linear or logit
-    kind="AA",
-    selection="position",
-    y=pheno[2],                 # IID-indexed Series, or supply famfile
-    covar=covar,
-    condition_on=None,          # optional initial full AA position IDs
-    significance_threshold=5e-6,
-    max_steps=20,
-    residue=False,
-    verbose=True,
-    use_progress_bar=False,
-    print_every=10,
-)
-```
-
-The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans.
-
-`check_rank=False` is the default for both selection modes. Set `check_rank=True`
-to enable the extra preliminary rank check. 
-
-### Output
-
-Returns a pandas DataFrame containing the most significant position from each scan, with additional columns:
-
-- STEP: Scan number.
-- SELECTED: Whether the position passed the significance threshold.
-
-The final non-significant result is retained but not added to the conditioning list.
-
-The selected positions, stopping reason, total runtime and other metadata are available through res.attrs.
-
-### Continue from previous results
-
-```python
-continued = hp.stats.stepwise(
-    hladat=hladat,
-    y=pheno[2],
-    config=cfg,
-    kind="AA",
-    covar=covar,
-    condition_on=res.attrs["condition_on"],
-    significance_threshold=1e-5,
-)
-```
-
-This starts a new stepwise analysis conditional on all previously selected positions.
-
-
-### Stepwise motif (haplotype) selection
-
-```python
-res = hp.stats.stepwise(
-    hladat=hladat,
-    y=pheno[2],
-    config=cfg,
-    covar=covar,
-    selection="motif",  # "haplotype" is an alias
-    reference=reference,
-    significance_threshold=5e-6,
-    max_steps=20,
-    check_rank=False,
-    verbose=True,
-)
-```
-
-The first scan identifies the most significant amino acid position. Subsequent scans test additional positions within the same HLA gene by comparing existing and expanded motifs using a likelihood-ratio test. This follows the conditional haplotype approach described by [Sakaue et al. (2023)](https://doi.org/10.1038/s41596-023-00853-4).
-
-**Two motif-building methods are supported:**
-
-- `mapped_aa_motif()`: Uses the allele mapping retained by `map_hla_alleles()`. No reference is required.
-- `dosage_aa_motif()`: Uses HLA allele dosages from `hladat.HLA.data` and an `HLAReference`, including fractional dosages.
-
-The appropriate method is selected automatically. Retain the original `hladat` containing HLA allele information, as amino acid dosages alone cannot recover haplotype phase.
-
-**Output**
-
-Returns a pandas DataFrame containing the most significant position from each scan, including the final nonsignificant result. Additional columns report the selected motif positions (`MOTIF_POSITIONS`) and the number of motif groups in the reduced and expanded models (`N_REDUCED_MOTIFS`, `N_EXPANDED_MOTIFS`).
-
-Selected positions, stopping reason, runtime and other metadata are available in `res.attrs`.
-
-**Continue from previous results**
-
-```python
-continued = hp.stats.stepwise(
-    hladat=hladat,
-    y=pheno[2],
-    config=cfg,
-    covar=covar,
-    reference=reference,
-    selection="motif",
-    condition_on=res.attrs["condition_on"],
-    significance_threshold=1e-5,
-)
-```
-
-This continues selection using the previously selected positions as the initial motif model. `max_steps` limits newly selected positions, excluding initial conditions.
-
-### Amino acid linkage disequilibrium (LD)
+## Amino acid linkage disequilibrium (LD)
 
 `hp.stats.LD()` calculates LD between amino acid positions using two methods:
 
@@ -486,3 +381,147 @@ Monomorphic positions are excluded, and undefined comparisons return `NaN`. No P
 For canonical correlation analysis (CCA), see [Hotelling (1936)](https://doi.org/10.1093/biomet/28.3-4.321).
 
 For Cramér's V, see [Thomson and Single (2014)](https://doi.org/10.1534/genetics.114.165266).
+
+## Stepwise Conditional Analysis
+
+In genetic association analysis, linkage disequilibrium (LD), where variants are inherited together, can result in multiple correlated variants showing significant associations with the same phenotype. This makes it difficult to identify independent association signals. One way to address this is through stepwise conditional analysis, where significant variants are added to the model and association analysis is repeated to identify additional signals.
+
+`hapy` provides several options for stepwise conditional analysis, described below.
+
+### Position-based stepwise conditional analysis
+
+hp.stats.stepwise() performs stepwise conditional association analysis of amino acid positions. It identifies the most significant position, adds it to the conditioning list, and repeats the analysis until no further positions meet the significance threshold.
+
+```python
+winners = hp.stats.stepwise(
+    hladat=hladat,
+    config=cfg,                 # StandardConfig: linear or logit
+    kind="AA",
+    selection="position",
+    y=pheno[2],                 # IID-indexed Series, or supply famfile
+    covar=covar,
+    condition_on=None,          # optional initial full AA position IDs
+    significance_threshold=5e-6,
+    max_steps=20,
+    residue=False,
+    verbose=True,
+    use_progress_bar=False,
+    print_every=10,
+)
+```
+
+The function uses the existing single-variant and omnibus tests for biallelic and multiallelic positions, respectively. Previously selected positions are automatically included as covariates in subsequent scans.
+
+`check_rank=False` is the default for both selection modes. Set `check_rank=True`
+to enable the extra preliminary rank check. 
+
+**Output**
+
+Returns a pandas DataFrame containing the most significant position from each scan, with additional columns:
+
+- STEP: Scan number.
+- SELECTED: Whether the position passed the significance threshold.
+
+The final non-significant result is retained but not added to the conditioning list.
+
+The selected positions, stopping reason, total runtime and other metadata are available through res.attrs.
+
+**Continue from previous results**
+
+```python
+continued = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    kind="AA",
+    covar=covar,
+    condition_on=res.attrs["condition_on"],
+    significance_threshold=1e-5,
+)
+```
+
+This starts a new stepwise analysis conditional on all previously selected positions.
+
+### Stepwise motif (haplotype) selection
+
+```python
+res = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    covar=covar,
+    selection="motif",  # "haplotype" is an alias
+    reference=reference,
+    significance_threshold=5e-6,
+    max_steps=20,
+    check_rank=False,
+    verbose=True,
+)
+```
+
+The first scan identifies the most significant amino acid position. Subsequent scans test additional positions within the same HLA gene by comparing existing and expanded motifs using a likelihood-ratio test. This follows the conditional haplotype approach described by [Sakaue et al. (2023)](https://doi.org/10.1038/s41596-023-00853-4).
+
+**Two motif-building methods are supported:**
+
+- `mapped_aa_motif()`: Uses the allele mapping retained by `map_hla_alleles()`. No reference is required.
+- `dosage_aa_motif()`: Uses HLA allele dosages from `hladat.HLA.data` and an `HLAReference`, including fractional dosages.
+
+The appropriate method is selected automatically. Retain the original `hladat` containing HLA allele information, as amino acid dosages alone cannot recover haplotype phase.
+
+**Output**
+
+Returns a pandas DataFrame containing the most significant position from each scan, including the final nonsignificant result. Additional columns report the selected motif positions (`MOTIF_POSITIONS`).
+
+Selected positions, stopping reason, runtime and other metadata are available in `res.attrs`.
+
+**Continue from previous results**
+
+```python
+continued = hp.stats.stepwise(
+    hladat=hladat,
+    y=pheno[2],
+    config=cfg,
+    covar=covar,
+    reference=reference,
+    selection="motif",
+    condition_on=res.attrs["condition_on"],
+    significance_threshold=1e-5,
+)
+```
+
+This continues selection using the previously selected positions as the initial motif model. `max_steps` limits newly selected positions, excluding initial conditions. With LD checking enabled, positions selected together count as one step.
+
+### LD-informed stepwise selection (with BIC-based model selection.)
+
+Set `ld_check=True` to compare significant positions with other positions in high LD before selection. This is supported for both position and motif-based stepwise analysis.
+
+```python
+winners = hp.stats.stepwise(
+    hladat, cfg, selection="position", y=phenotype, covar=covariates,
+    ld_check=True, ld_method="cca", ld_threshold=0.9,
+)
+```
+
+Two LD methods are supported:
+
+- **CCA (default):** Uses amino acid dosages and supports comparisons across genes.
+- **Cramér's V:** Uses HLA allele frequencies and compares positions within the same gene. Requires allele mapping or HLA dosages with a reference.
+
+The original winner’s LD partners are sorted once, from highest to lowest LD. Each is compared in turn using the selection updated by earlier comparisons; replacements and additions do not introduce new partners.
+
+Positions meeting the LD threshold are compared using the Bayesian Information Criterion (BIC), with a minimum BIC difference of 2. The comparison can **retain the original position, replace it or select both**. Any proposed selection must also meet the significance threshold.
+
+For motif analysis, comparisons are restricted to the selected gene and use expanded motifs to evaluate alternative positions or their joint effects.
+
+**Output**
+
+The results retain the standard stepwise format, with additional information:
+
+- `SELECTED_VARIANTS`: Positions selected at each step, including jointly selected positions.
+- `winners.attrs["ld_comparisons"]`: LD comparisons and BIC-based decisions.
+- `winners.attrs["condition_on"]`: All selected positions for subsequent analysis.
+
+Jointly selected positions count as one step towards `max_steps`. With `verbose=True`, accepted changes are reported alongside their LD, BIC improvement and P-value.
+
+By default, `ld_check=False`, and standard stepwise selection is unchanged.
+

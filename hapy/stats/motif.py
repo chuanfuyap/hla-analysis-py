@@ -220,7 +220,13 @@ def expand_motif(hladat, config: StandardConfig, positions, add_position, *,
         return _motif_result(row, None, _prepared)
 
     # Drop a child of the old reference so the reduced model stays nested.
-    new_motifs.attrs["reference"] = new_motifs[children].sum().idxmax()
+    reference_motif = new_motifs[children].sum().idxmax()
+    if _prepared is not None and "reference_motif" in _prepared:
+        reference_motif = _prepared["reference_motif"]
+        if reference_motif not in children:
+            row["INFO"] = "expanded reference does not belong to the existing reference group"
+            return _motif_result(row, None, _prepared)
+    new_motifs.attrs["reference"] = reference_motif
     row["Ref_AA"] = new_motifs.attrs["reference"]
     reduced, _ = _motif_genotype(old_motifs, "MOTIF_R")
     expanded, labels = _motif_genotype(new_motifs, "MOTIF_F")

@@ -63,7 +63,7 @@ association P-values.
 
 ## Interaction naming
 
-Use `kind` for the focal HLA genotype block and `partner_kind` for the interacting
+Use `kind` for the HLA genotype block and `partner_kind` for the interacting
 block. 
 
 
@@ -150,12 +150,12 @@ results = hp.stats.interaction(
 | `famfile` | `pandas.DataFrame` or `None` | `None` | Sample table containing `IID` and, when `y` is omitted, `PHENO`. Required when `y` is an unindexed array. |
 | `covar` | `pandas.DataFrame`, `str`, `pathlib.Path` or `None` | `None` | IID-indexed covariates, or a comma-separated CSV path with sample IDs in its first column. Read other delimiters explicitly with pandas. Required for `partner_kind="COV"`. |
 | `y` | `pandas.Series`, one-dimensional array-like or `None` | `None` | Phenotype Series indexed by IID, array aligned to FAM row order, or `None` to use `famfile["PHENO"]`. |
-| `variant_filter` | callable or `None` | `None` | Select focal variants before genotype construction. Does not filter partner predictors or conditioning terms; subset partner data separately. |
+| `variant_filter` | callable or `None` | `None` | Select HLA variants before genotype construction. Does not filter partner predictors or conditioning terms; subset partner data separately. |
 | `pair_filter` | callable or `None` | `None` | Function receiving a candidate interaction context and returning `True` to keep or `False` to exclude it, after genotype blocks are constructed. |
 | `cov_block_cols` | list of `str` or `None` | `None` | Covariate columns tested as interacting predictors. Required for `partner_kind="COV"`; do not pass for `partner_kind="DF"`. |
 | `baseline_covar_cols` | list of `str` or `None` | `None` | Baseline adjustment columns. `None` adjusts for all other covariates in each test, including other `cov_block_cols` columns. The current partner is included once as a main effect. `[]` selects no baseline covariates. |
 | `partner_data` | `pandas.DataFrame` or `None` | `None` | External IID-indexed partner predictors. Required for `partner_kind="DF"`; use numeric dosages or numeric indicators. |
-| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind focal variant IDs included as adjustment terms. Conditioning variants are excluded from focal testing. For AA, use position IDs without residue suffixes. |
+| `condition_on` | `str`, sequence of `str` or `None` | `None` | Same-kind HLA variant IDs included as adjustment terms. Conditioning variants are excluded from testing. For AA, use position IDs without residue suffixes. |
 | `residue` | `bool` | `False` | In pairwise mode, add an available QC-passing reference AA residue without duplicating existing tests. Requires AA on at least one side; other modes raise `ValueError`. |
 | `verbose` | `bool` | `True` | Print execution settings, task counts, progress and timing. |
 | `use_progress_bar` | `bool` | `False` | Use tqdm when available and `verbose=True`; otherwise use periodic progress messages. |
@@ -344,7 +344,7 @@ conditional = hp.stats.interaction(
 )
 ```
 
-The specified variants are included as additional covariates and excluded from interaction testing. Conditioning applies only to the focal (`kind`) block, not the partner (`partner_kind`) block.
+The specified variants are included as additional covariates and excluded from interaction testing. Conditioning applies only to the (`kind`) block, not the partner (`partner_kind`) block.
 
 Variants without eligible genotype columns are not included in the adjustment.
 
@@ -361,11 +361,11 @@ results do not include a `TEST` column; the test is determined by `config.mode`.
 |---|---|
 | `VARIANT`, `GENE`, `AA_POS` | Tested variant identifier, gene and amino acid sequence position, where available. In omnibus mode, these describe the AA position being tested jointly, including when it is on the partner side. |
 | `Amino_Acids`, `Ref_AA`, `AAcount` | Available amino acid labels, reference residue and allele count, where reported. Additional residue results use `Ref_AA="tested: X"` to identify the tested residue. |
-| `Variant_col` | Selected encoded focal genotype column in pairwise analysis when a variant contains multiple tested columns. |
+| `Variant_col` | Selected encoded genotype column in pairwise analysis when a variant contains multiple tested columns. |
 | `Partner_col` | Interacting genotype or covariate column. In omnibus mode, this is the single predictor tested against the AA block. |
 | `Partner_*` annotations | Available information about the other block, such as gene, amino acid position and reference residue. An additional partner-side reference test uses `Partner_Ref_AA="tested: X"`. |
 | `AA_AF` | Amino acid frequencies on the final modelling samples, formatted as `F=0.2;S=0.8`. Additional reference-residue rows report the tested residue's frequency. |
-| `HLA_AF`, `MAF` | Focal HLA allele frequency or SNP minor allele frequency on the final modelling samples, where applicable. |
+| `HLA_AF`, `MAF` | HLA allele frequency or SNP minor allele frequency on the final modelling samples, where applicable. |
 | `Partner_AF` | Frequency of the selected genotype partner, calculated as mean dosage divided by two. External `partner_data` uses this genotype-dosage convention. |
 | `Partner_mean` | Mean of a numeric interacting covariate. For a numeric 0/1 predictor, this is the proportion coded 1. |
 | `Partner_proportion` | Proportion in the second category for a binary categorical or boolean interacting covariate. Check the category ordering when interpreting this value. |
@@ -386,7 +386,7 @@ the primary result tests the `variant:partner` coefficient.
 | `Statistic` | t-statistic for linear regression or Wald z-statistic for logistic regression. |
 | `Beta`, `StdErr` | Interaction coefficient and its standard error. |
 | `CI-lower`, `CI-upper` | Lower and upper limits of the interaction coefficient's 95% confidence interval. |
-| `Variant_p`, `Variant_Beta` | Focal variant main-effect P-value and coefficient from the full interaction model. |
+| `Variant_p`, `Variant_Beta` | Variant main-effect P-value and coefficient from the full interaction model. |
 | `Partner_p`, `Partner_Beta` | Partner main-effect P-value and coefficient from the full interaction model. |
 
 For linear regression, `Beta` describes how the effect of one predictor changes

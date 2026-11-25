@@ -18,6 +18,7 @@ from .runners.standard_runner import (
 )
 from .types import StandardConfig
 from .motif import expand_motif
+from ._stepwise_ld import _prepare_ld, _ld_scan_compare, _selected_variants
 from ._motif import (_choose_motif_builder, _build_motifs,
                      _motif_genotype, _initial_motifs)
 
@@ -47,7 +48,7 @@ def _conditioning_label(conditions):
 
 def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
              famfile=None, covar=None, y=None, variant_filter=None, condition_on=None,
-             reference=None, max_genes=1,
+             reference=None, max_genes=1, ld_check=False, ld_method="cca", ld_threshold=0.9,
              significance_threshold=5e-6, max_steps=20, residue=False, check_rank: bool = False,
              verbose=True, use_progress_bar=False, print_every=100) -> pd.DataFrame:
     """Perform stepwise conditional analysis of AA positions or within-gene motifs.
@@ -69,7 +70,15 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
     significance_threshold : float, default 5e-6
         P-value threshold for selecting additional positions.
     max_steps : int, default 20
-        Maximum number of newly selected positions.
+        Maximum number of newly selected positions. With LD checking, a group
+        selected together counts as one step, even when it adds several positions.
+    ld_check : bool, default False
+        Compare significant winners against eligible positions in high LD.
+    ld_method : {"cca", "cramer"}, default "cca"
+        CCA permits cross-gene position comparisons. Cramer's V is within-gene.
+        Motif comparisons remain within the active gene for either method.
+    ld_threshold : float, default 0.9
+        Minimum LD for comparing a partner against the current selection.
     max_genes : int, default 1
         Maximum number of genes in motif selection, including initial conditions.
         Completed gene motifs remain fixed while searching other genes.
@@ -82,7 +91,8 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         Most significant position from each scan, including STEP, SELECTED,
         and the final nonsignificant result. Selected positions, stopping
         reason, runtime and other metadata are stored in ``attrs``.
-        Motif results also report tested positions and motif group counts.
+        Motif results also report tested positions. LD decisions are stored in
+        attrs["ld_comparisons"]. SELECTED_VARIANTS lists positions selected together.
 
     Notes
     -----
@@ -125,17 +135,25 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
     phenotype = prepare_y(famfile, y=y)
     covariates = prepare_covar(covar, phenotype.index)
     eligible = {v for v in AAAdapter.iter_variants(hladat) if not str(v).startswith("MOTIF_")}
+    ld_state = None
+    if ld_check:
+        if ld_method not in ("cca", "cramer"):
+            raise ValueError("ld_method must be 'cca' or 'cramer'.")
+        if (isinstance(ld_threshold, bool) or not isinstance(ld_threshold, Real)
+                or not np.isfinite(ld_threshold) or not 0 <= ld_threshold <= 1):
+            raise ValueError("ld_threshold must be finite and between 0 and 1.")
+        ld_state = _prepare_ld(hladat, eligible, ld_method, ld_threshold, reference)
     if verbose:
         print(f"STARTING STEPWISE CONDITIONAL ANALYSIS - {selection} based", flush=True)
     arguments = (hladat, config, phenotype, covariates, eligible, conditions,
                  significance_threshold, max_steps, check_rank, variant_filter,
                  verbose, use_progress_bar, print_every, started)
     if selection == "position":
-        out = _position_based(*arguments)
+        out = _position_based(*arguments, ld_state=ld_state)
     elif max_genes == 1:
-        out = _motif_based(*arguments, reference)
+        out = _motif_based(*arguments, reference, ld_state=ld_state)
     else:
-        out = _multi_gene_motif(*arguments, reference, max_genes)
+        out = _multi_gene_motif(*arguments, reference, max_genes, ld_state=ld_state)
     reason = out.attrs["stop_reason"]
     scans = out.attrs["scans"]
     elapsed = out.attrs["elapsed_seconds"]
@@ -150,13 +168,15 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         position_noun = "position" if selected == 1 else "positions"
         print("Analysis complete", flush=True)
         print(f"{scans} {scan_noun} | {selected} selected {position_noun} | Total: {elapsed:.1f}s", flush=True)
+    if ld_state is not None:
+        out.attrs["ld_comparisons"] = ld_state["history"]
     return _clean_stepwise_output(out)
 
 
 def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
                     significance_threshold, max_steps, check_rank, variant_filter,
                     verbose, use_progress_bar, print_every, started, *, step_offset=0,
-                    fixed_conditions=()):
+                    fixed_conditions=(), ld_state=None, ld_mode="position"):
     """Run the existing position-selection loop and assemble its winners table."""
     initial = list(conditions)
     rows, failures = [], []
@@ -195,6 +215,12 @@ def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
         candidates = table.loc[valid].copy()
         candidates["P-value"] = p.loc[valid]
         winner = candidates.sort_values(["P-value", "VARIANT"], kind="stable").iloc[0].to_dict()
+        if ld_state is not None:
+            winner, _ = _ld_scan_compare(hladat, config, winner, state=ld_state,
+                eligible=set(candidates["VARIANT"]), conditions=conditions, y=phenotype,
+                covar=covariates, significance_threshold=significance_threshold,
+                step=step, mode=ld_mode, check_rank=check_rank,
+                variant_filter=variant_filter, fixed_conditions=fixed_conditions, verbose=verbose)
         accepted = bool(winner["P-value"] < significance_threshold)
         winner.update(STEP=step, SELECTED=accepted)
         rows.append(winner)
@@ -209,7 +235,7 @@ def _position_based(hladat, config, phenotype, covariates, eligible, conditions,
         if not accepted:
             reason = "threshold_not_met"
             break
-        conditions.append(winner["VARIANT"])
+        conditions.extend(_selected_variants(winner))
     remaining = eligible.difference(conditions)
     if reason == "max_steps" and not remaining:
         reason = "no_remaining_positions"
@@ -247,7 +273,7 @@ def _valid_motif_result(row):
 def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
                  significance_threshold, max_steps, check_rank, variant_filter,
                  verbose, use_progress_bar, print_every, started, reference, *,
-                 return_motifs=False, step_offset=0, fixed_conditions=(), builder=None):
+                 return_motifs=False, step_offset=0, fixed_conditions=(), builder=None, ld_state=None):
     """Select a position, then test progressively expanded within-gene motifs."""
     if builder is None:
         builder = _choose_motif_builder(hladat, reference, phenotype.index)
@@ -261,13 +287,13 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
     if not conditions:
         first = _position_based(hladat, config, phenotype, covariates, eligible, [],
             significance_threshold, 1, check_rank, variant_filter, verbose,
-            use_progress_bar, print_every, started)
+            use_progress_bar, print_every, started, ld_state=ld_state, ld_mode="initial")
         rows = first.to_dict("records")
         failures = first.attrs["failed_tests"]
         scans = first.attrs["scans"]
         if first.empty or not first.SELECTED.iloc[0]:
             return (first, None) if return_motifs else first
-        conditions.append(first.VARIANT.iloc[0])
+        conditions.extend(first.attrs["condition_on"])
     genes = {annotations[v]["gene"] for v in conditions}
     if len(genes) != 1:
         raise ValueError("Motif condition_on positions must belong to one HLA gene.")
@@ -281,16 +307,16 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
         rows[0].update(MOTIF_POSITIONS=";".join(positions), N_REDUCED_MOTIFS=0,
                        N_EXPANDED_MOTIFS=len(old_motifs.columns))
     initial_motif_groups = len(old_motifs.columns)
-    new_selections = len(conditions) - len(initial)
+    new_selections = len(rows) if ld_state is not None else len(conditions) - len(initial)
     reason = "max_steps"
     remaining = {v for v in eligible.difference(conditions) if annotations[v]["gene"] == gene
                  and annotations[v]["position"] not in positions}
 
-    while new_selections < max_steps:
+    first_step = step_offset + scans + 1
+    for step in range(first_step, first_step + max_steps - new_selections):
         if not remaining:
             reason = "no_remaining_positions"
             break
-        step = step_offset + scans + 1
         scan_started = time.perf_counter()
         if verbose:
             print(f"Step {step} — Conditional analysis", flush=True)
@@ -311,6 +337,7 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
         progress = ProgressPrinter(total=len(remaining), desc=f"Step {step}",
             use_tqdm=use_progress_bar, print_every=print_every) if verbose else None
         best = None
+        valid_candidates = set()
         try:
             for row, new_motifs in parallel_imap_batched(worker, sorted(remaining), config.n_jobs,
                     config.backend, batch_size=config.batch_size, max_in_flight=config.chunksize):
@@ -319,6 +346,7 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
                 if not _valid_motif_result(row):
                     failures.append(dict(row, STEP=step))
                     continue
+                valid_candidates.add(row["VARIANT"])
                 if best is None or (row["P-value"], row["VARIANT"]) < (best[0]["P-value"], best[0]["VARIANT"]):
                     best = row, new_motifs
         finally:
@@ -332,6 +360,13 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
                 print(f"Elapsed: {time.perf_counter() - scan_started:.1f}s\n", flush=True)
             break
         winner, winning_motifs = best
+        if ld_state is not None:
+            winner, winning_motifs = _ld_scan_compare(hladat, config, winner,
+                state=ld_state, eligible=valid_candidates, conditions=conditions,
+                y=phenotype, covar=covariates, significance_threshold=significance_threshold,
+                step=step, mode="motif", builder=builder, old_motifs=old_motifs,
+                winning_motifs=winning_motifs, check_rank=check_rank,
+                variant_filter=variant_filter, fixed_conditions=fixed_conditions, verbose=verbose)
 
         accepted = bool(winner["P-value"] < significance_threshold)
         winner.update(STEP=step, SELECTED=accepted)
@@ -347,11 +382,11 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
         if not accepted:
             reason = "threshold_not_met"
             break
-        conditions.append(winner["VARIANT"])
-        positions = positions + [annotations[winner["VARIANT"]]["position"]]
+        selected = _selected_variants(winner)
+        conditions.extend(selected)
+        positions += [annotations[v]["position"] for v in selected]
 
         old_motifs = winning_motifs
-        new_selections += 1
         remaining = {v for v in remaining.difference(conditions) if annotations[v]["position"] not in positions}
     if reason == "max_steps" and not remaining:
         reason = "no_remaining_positions"
@@ -372,7 +407,7 @@ def _motif_based(hladat, config, phenotype, covariates, eligible, conditions,
 
 def _multi_gene_motif(hladat, config, phenotype, covariates, eligible, conditions,
                       significance_threshold, max_steps, check_rank, variant_filter,
-                      verbose, use_progress_bar, print_every, started, reference, max_genes):
+                      verbose, use_progress_bar, print_every, started, reference, max_genes, *, ld_state=None):
     """Finish each gene's motif search before scanning the remaining genes."""
     builder = _choose_motif_builder(hladat, reference, phenotype.index)
     annotations = {variant: group.iloc[0] for variant, group in hladat.AA.info.groupby("AA_ID")
@@ -420,24 +455,26 @@ def _multi_gene_motif(hladat, config, phenotype, covariates, eligible, condition
 
     # Earlier supplied genes are fixed; the last supplied gene resumes searching.
     active_gene = next(reversed(by_gene)) if by_gene else None
-    for gene, seeds in by_gene.items():
+    for gene, initial_positions in by_gene.items():
         if gene == active_gene:
             break
         table, motifs = _motif_based(hladat, config, phenotype, adjustment, eligible,
-            list(seeds), significance_threshold, 0, check_rank, variant_filter,
+            list(initial_positions), significance_threshold, 0, check_rank, variant_filter,
             False, use_progress_bar, print_every, started, reference,
-            return_motifs=True, builder=builder)
+            return_motifs=True, builder=builder, ld_state=ld_state)
         gene_positions[gene] = table.attrs["selected_positions"]
         gene_stops[gene] = "initial_fixed"
-        selected.extend(seeds)
+        selected.extend(initial_positions)
         freeze(gene, motifs)
 
     reason = "max_genes"
-    while selections_left > 0:
+    for _ in range(max_genes - len(completed)):
+        if selections_left <= 0:
+            break
         fixed = list(selected)
-        seeded = active_gene is None
+        new_gene = active_gene is None
         if active_gene is not None:
-            seeds = list(by_gene[active_gene])
+            initial_positions = list(by_gene[active_gene])
         else:
             if len(completed) >= max_genes:
                 reason = "max_genes"
@@ -447,26 +484,26 @@ def _multi_gene_motif(hladat, config, phenotype, covariates, eligible, condition
                 print("SCANNING POSITIONS OUTSIDE COMPLETED GENE(S).", flush=True)
                 print("---------------------------------------------", flush=True)
                 print(flush=True)
-            seed = _position_based(hladat, config, phenotype, adjustment, remaining, [],
+            initial_result = _position_based(hladat, config, phenotype, adjustment, remaining, [],
                 significance_threshold, 1, check_rank, variant_filter, verbose,
                 use_progress_bar, print_every, started, step_offset=scans,
-                fixed_conditions=fixed)
-            record(seed, fixed)
-            scans += seed.attrs["scans"]
-            if seed.empty or not seed.SELECTED.iloc[0]:
-                reason = seed.attrs["stop_reason"]
+                fixed_conditions=fixed, ld_state=ld_state, ld_mode="initial")
+            record(initial_result, fixed)
+            scans += initial_result.attrs["scans"]
+            if initial_result.empty or not initial_result.SELECTED.iloc[0]:
+                reason = initial_result.attrs["stop_reason"]
                 break
-            seeds = [seed.VARIANT.iloc[0]]
-            active_gene = str(annotations[seeds[0]]["GENE"])
+            initial_positions = list(initial_result.attrs["condition_on"])
+            active_gene = str(annotations[initial_positions[0]]["GENE"])
             selections_left -= 1
 
         table, motifs = _motif_based(hladat, config, phenotype, adjustment, eligible,
-            seeds, significance_threshold, selections_left, check_rank, variant_filter,
+            initial_positions, significance_threshold, selections_left, check_rank, variant_filter,
             verbose, use_progress_bar, print_every, started, reference,
-            return_motifs=True, step_offset=scans, fixed_conditions=fixed, builder=builder)
-        if seeded:
-            # The seed position scan is also the first model of this gene.
-            rows[-1].update(MOTIF_POSITIONS=str(annotations[seeds[0]]["AA_POS"]),
+            return_motifs=True, step_offset=scans, fixed_conditions=fixed, builder=builder, ld_state=ld_state)
+        if new_gene:
+            # The initial position scan is also the first model of this gene.
+            rows[-1].update(MOTIF_POSITIONS=";".join(str(annotations[v]["AA_POS"]) for v in initial_positions),
                             N_REDUCED_MOTIFS=0,
                             N_EXPANDED_MOTIFS=table.attrs["initial_motif_groups"])
         record(table, fixed)
@@ -512,9 +549,9 @@ def _clean_stepwise_output(dataframe):
     df = _clean_output(df)
 
     first = [
-        "STEP", "SELECTED", "VARIANT", "GENE", "AA_POS", "MOTIF_POSITIONS",
-        "COND_VARIANTS", "Amino_Acids", "Ref_AA", "AAcount", "AA_AF",
-        "TEST", "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF",
+         "VARIANT", "GENE", "AA_POS", "MOTIF_POSITIONS", "Amino_Acids", "Ref_AA", "AAcount", "AA_AF",
+        "P-value", "Statistic", "Beta", "StdErr", "CI-lower", "CI-upper", "DoF","TEST","SELECTED", 
+        "COND_VARIANTS"
     ]
     last = ["N_used", "N_case", "N_control", "INFO"]
     first = [c for c in first if c in df]
@@ -522,4 +559,4 @@ def _clean_stepwise_output(dataframe):
     middle = [c for c in df if c not in first + last]
     result = df[first + middle + last]
     result.attrs = dataframe.attrs.copy()
-    return result
+    return result.set_index("STEP")
