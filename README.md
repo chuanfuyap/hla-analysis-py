@@ -1,62 +1,67 @@
 # hla-analysis-python (hapy)
 
-A Python framework for HLA allele, amino-acid, SNP, interaction, survival, and meta-analysis workflows in immunogenetic association studies.
+A Python framework for HLA association analysis and fine-mapping in immunogenetic studies.
 
 ## Overview
 
-hapy is a Python package for downstream analysis of HLA imputation outputs from genetic association studies. The framework supports analysis of classical HLA alleles, amino-acid polymorphisms, and SNP markers across the HLA region using a unified workflow interface.
+hapy is a Python package for downstream analysis of imputed and directly typed HLA data. The framework supports the analysis of classical HLA alleles, amino acid polymorphisms and SNP markers across the HLA region through a unified workflow interface.
 
-Currently supported input formats include:
+Supported input formats include:
 - SNP2HLA output
 - Michigan Imputation Server HLA output
-- PLINK-derived genotype formats
-- Beagle-derived genotype format
-
-## Intended use
-
-`hapy` is designed for:
-- HLA fine-mapping studies
-- amino-acid association analysis
-- autoimmune disease genetics
-- immunogenetics workflows
-- multi-cohort HLA association studies
+- PLINK-derived genotype formats (both PLINK1/2)
+- Beagle-derived genotype formats
+- HLA allele calls and amino acid dosage data
 
 ## Features
 
-- HLA allele-to-amino-acid conversion with locally built IPD references
-- Amino-acid omnibus association testing
+### Association analysis
+- Amino acid omnibus association testing
+- Individual amino acid residue association testing
 - Classical HLA allele association analysis
 - SNP-level association analysis
 - Covariate-adjusted regression models
-- HLA variant conditional analysis
-- Gene/Variant filtering
-- MAF filtering
-- Interaction analysis
+- Conditional association analysis
 - Survival analysis
-- Cohort-level meta-analysis using Stouffer’s method and inverse-variance weighted method
-- Parallelised association testing workflows
+- Gene–gene (G×G) and gene–environment (G×E) interaction analysis
 
-Supported models include:
+#### Supported statistical models include:
 - Linear regression
 - Logistic regression
-- Cox proportional hazards models
+- Cox proportional hazards regression
+
+### Conditional fine-mapping
+- Stepwise conditional analysis at the amino acid position and within-gene motif (haplotype) levels
+- LD-informed stepwise model selection
+- Multiallelic linkage disequilibrium (LD) analysis using canonical correlation analysis (CCA) and Cramér's V
+- Model comparison using information criteria and likelihood ratio tests
+
+### Quality control and targeted analysis
+- HLA gene and variant selection for association testing
+- Minor allele frequency (MAF) filtering
+
+### HLA allele mapping
+- HLA allele-to-amino-acid conversion using locally built IPD-IMGT/HLA reference panels
+- Within-gene amino acid motif construction
+- Support for high-resolution HLA allele calls
+
+### Meta-analysis
+- Weighted Stouffer's method for combining association P-values
+- Inverse-variance weighted meta-analysis of effect estimates
+
+### Visualisation and computational performance
+- Amino acid position-level Manhattan plots
+- Three-dimensional interaction visualisation
+- Parallelised association testing with thread- and process-based execution
 
 ## Installation
 
-Clone the repository and install locally:
-
-It is recommended to install hapy within a clean conda environment.
+It is recommended to install hapy within a clean [conda](https://www.anaconda.com/download) environment.
 
 ```bash
-conda create -n hapy python=3.11
-conda activate hapy
-pip install .
-```
-
-Alternatively install via PyPI
-
-```bash
-pip install hla-hapy
+conda create -n hapy python=3.11 # creates the conda environment
+conda activate hapy # accesses the environment
+pip install hla-hapy # installs hapy
 ```
 
 
