@@ -4,7 +4,7 @@ import numpy as np
 import pandas as pd
 
 from .adapters.aa import AAAdapter
-from .models.standard import fit_position_comparison
+from .models.standard import fit_position_comparison, _validate_comparison_options
 from .preprocess import prepare_y, prepare_covar, make_model_table
 from .types import StandardConfig
 
@@ -19,6 +19,8 @@ def compare_positions(
     covar=None,
     y=None,
     min_delta_bic=2.0,
+    criterion="bic",
+    conditional_threshold=0.01,
 ) -> pd.DataFrame:
     """Compare two amino acid positions using BIC and conditional tests.
 
@@ -41,12 +43,17 @@ def compare_positions(
         Without famfile, y must be a Series indexed by IID.
     min_delta_bic : float, optional
         Minimum BIC difference to prefer one model. Defaults to 2.
+    criterion : {"bic", "conditional"}, default "bic"
+        Rule used for RECOMMENDATION. Both recommendations are returned.
+    conditional_threshold : float, default 0.01
+        Conditional P-values below this threshold are significant.
 
     Returns
     -------
     pandas.DataFrame
         One row with BIC for A, B and A+B, reciprocal conditional P-values
-        and degrees of freedom, sample count, recommendation and INFO.
+        and degrees of freedom, sample count, both recommendations and INFO.
+        RECOMMENDATION follows criterion.
 
     Notes
     -----
@@ -54,9 +61,13 @@ def compare_positions(
     Lower BIC is preferred. Conditional tests use F-tests for linear models
     and likelihood-ratio tests for logistic models.
     If the joint model cannot be fitted, its results are NaN and INFO
-    describes the issue. The individual models are still compared.
+    describes the issue. The individual models are still compared by BIC.
+    Conditional selection extends when both tests are significant, replaces A
+    when only B given A is significant, and retains A when only A given B is
+    significant. Neither significant, or either unavailable, is unresolved.
     """
 
+    _validate_comparison_options(criterion, conditional_threshold)
     if not isinstance(config, StandardConfig) or config.model_type not in ("linear", "logit"):
         raise ValueError("config must be StandardConfig with model_type='linear' or 'logit'.")
 
@@ -113,7 +124,8 @@ def compare_positions(
 
     result = fit_position_comparison(
         abt, a_cols, b_cols, covar_cols, config.model_type,
-        min_delta_bic=min_delta_bic,
+        min_delta_bic=min_delta_bic, criterion=criterion,
+        conditional_threshold=conditional_threshold,
     )
     return pd.DataFrame([{
         "POSITION_A": position_a,
@@ -124,7 +136,8 @@ def compare_positions(
 
 def compare_positions_motif(hladat, config: StandardConfig, positions_a, positions_b,
                             *, famfile=None, covar=None, y=None, reference=None,
-                            min_delta_bic=2.0) -> pd.DataFrame:
+                            min_delta_bic=2.0, criterion="bic",
+                            conditional_threshold=0.01) -> pd.DataFrame:
     """Compare alternative amino acid motifs using BIC and conditional tests.
 
     Parameters
@@ -147,23 +160,31 @@ def compare_positions_motif(hladat, config: StandardConfig, positions_a, positio
         Required when no retained allele mapping is available.
     min_delta_bic : float, optional
         Minimum BIC difference to prefer one model. Defaults to 2.
+    criterion : {"bic", "conditional"}, default "bic"
+        Rule used for RECOMMENDATION. Both recommendations are returned.
+    conditional_threshold : float, default 0.01
+        Conditional P-values below this threshold are significant.
 
     Returns
     -------
     pandas.DataFrame
         One row with position sets, motif counts, BIC, conditional tests,
-        sample count, recommendation and INFO.
+        sample count, both recommendations and INFO. RECOMMENDATION follows criterion.
 
     Notes
     -----
     A and B use their respective motifs. AB uses the full motif over the
     union of positions, including the shared positions. All models use
     identical samples. A+B recommends this combined motif.
+    Conditional selection extends when both tests are significant, replaces A
+    when only B given A is significant, and retains A when only A given B is
+    significant. Neither significant, or either unavailable, is unresolved.
     """
     from ._motif import (_choose_motif_builder, _build_motifs,
                          _expanded_motif_parents, _motif_genotype)
     from .models.standard import fit_motif_comparison
 
+    _validate_comparison_options(criterion, conditional_threshold)
     if not isinstance(config, StandardConfig) or config.model_type not in ("linear", "logit"):
         raise ValueError("config must be StandardConfig with model_type='linear' or 'logit'.")
     if not np.isfinite(min_delta_bic) or min_delta_bic < 0:
@@ -241,7 +262,8 @@ def compare_positions_motif(hladat, config: StandardConfig, positions_a, positio
                     break
     result = fit_motif_comparison(abt, *[list(block) for block in blocks],
                                   covar_cols, config.model_type,
-                                  min_delta_bic=min_delta_bic, joint_issue=issue)
+                                  min_delta_bic=min_delta_bic, joint_issue=issue,
+                                  criterion=criterion, conditional_threshold=conditional_threshold)
     return pd.DataFrame([{
         "POSITIONS_A": ";".join(positions_a), "POSITIONS_B": ";".join(positions_b),
         "POSITIONS_AB": ";".join(union), "GENE": gene,

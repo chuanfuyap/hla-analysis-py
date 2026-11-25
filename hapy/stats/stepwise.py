@@ -49,6 +49,7 @@ def _conditioning_label(conditions):
 def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
              famfile=None, covar=None, y=None, variant_filter=None, condition_on=None,
              reference=None, max_genes=1, ld_check=False, ld_method="cca", ld_threshold=0.9,
+             ld_criterion="bic", ld_conditional_threshold=0.01,
              significance_threshold=5e-6, max_steps=20, residue=False, check_rank: bool = False,
              verbose=True, use_progress_bar=False, print_every=100) -> pd.DataFrame:
     """Perform stepwise conditional analysis of AA positions or within-gene motifs.
@@ -79,6 +80,11 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
         Motif comparisons remain within the active gene for either method.
     ld_threshold : float, default 0.9
         Minimum LD for comparing a partner against the current selection.
+    ld_criterion : {"bic", "conditional"}, default "bic"
+        Rule used to retain, replace or extend the LD winner.
+    ld_conditional_threshold : float, default 0.01
+        Significance threshold for reciprocal conditional tests, independent
+        of significance_threshold for the final association model.
     max_genes : int, default 1
         Maximum number of genes in motif selection, including initial conditions.
         Completed gene motifs remain fixed while searching other genes.
@@ -137,12 +143,15 @@ def stepwise(hladat, config: StandardConfig, *, kind="AA", selection="position",
     eligible = {v for v in AAAdapter.iter_variants(hladat) if not str(v).startswith("MOTIF_")}
     ld_state = None
     if ld_check:
+        from .models.standard import _validate_comparison_options
+        _validate_comparison_options(ld_criterion, ld_conditional_threshold)
         if ld_method not in ("cca", "cramer"):
             raise ValueError("ld_method must be 'cca' or 'cramer'.")
         if (isinstance(ld_threshold, bool) or not isinstance(ld_threshold, Real)
                 or not np.isfinite(ld_threshold) or not 0 <= ld_threshold <= 1):
             raise ValueError("ld_threshold must be finite and between 0 and 1.")
         ld_state = _prepare_ld(hladat, eligible, ld_method, ld_threshold, reference)
+        ld_state.update(criterion=ld_criterion, conditional_threshold=ld_conditional_threshold)
     if verbose:
         print(f"STARTING STEPWISE CONDITIONAL ANALYSIS - {selection} based", flush=True)
     arguments = (hladat, config, phenotype, covariates, eligible, conditions,

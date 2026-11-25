@@ -115,6 +115,8 @@ def _ld_scan_compare(hladat, config, winner, *, state, eligible, conditions,
     if winner["P-value"] >= significance_threshold:
         return winner, winning_motifs
     matrix, annotations = state["matrix"], state["annotations"]
+    criterion = state.get("criterion", "bic")
+    conditional_threshold = state.get("conditional_threshold", 0.01)
     selected = [winner["VARIANT"]]
     current_winner = selected[0]
     excluded = set(conditions) | set(fixed_conditions) | set(selected)
@@ -135,18 +137,21 @@ def _ld_scan_compare(hladat, config, winner, *, state, eligible, conditions,
         extras = [v for v in selected if v != current_winner]
         shared = list(conditions) + extras
         history = dict(STEP=step, SELECTION=mode, A=current_winner, B=partner, LD=ld,
-                       POSITIONS_BEFORE=";".join(selected), ACTION="retain")
+                       POSITIONS_BEFORE=";".join(selected), ACTION="retain",
+                       CRITERION=criterion, CONDITIONAL_THRESHOLD=conditional_threshold)
         try:
             # Completed-gene motifs are already in covar. Do not append them twice.
             if mode in ("position", "initial"):
                 adjustment, _ = _prepare_conditions(AAAdapter, hladat, y.index,
                     covar.copy() if covar is not None else None, shared)
                 comparison = compare_positions(hladat, config, current_winner, partner,
-                                                y=y, covar=adjustment)
+                                                y=y, covar=adjustment, criterion=criterion,
+                                                conditional_threshold=conditional_threshold)
             else:
                 comparison = compare_positions_motif(hladat, config,
                     shared + [current_winner], shared + [partner], y=y, covar=covar,
-                    reference=state["reference"])
+                    reference=state["reference"], criterion=criterion,
+                    conditional_threshold=conditional_threshold)
             history.update(comparison.iloc[0].to_dict())
             recommendation = comparison.iloc[0]["RECOMMENDATION"]
             proposed = list(selected)
@@ -182,14 +187,20 @@ def _ld_scan_compare(hladat, config, winner, *, state, eligible, conditions,
                         old_label = " ".join(annotations[history["A"]])
                         new_label = " ".join(annotations[partner])
                         if recommendation == "B":
-                            action = f"{new_label} (BIC: {history['BIC_B']}) replaces {old_label} (BIC: {history['BIC_A']})"
-                            delta = -history["Delta_BIC_B_minus_A"]
+                            action = f"{new_label} replaces {old_label}"
+                            if criterion == "bic":
+                                action = f"{new_label} (BIC: {history['BIC_B']}) replaces {old_label} (BIC: {history['BIC_A']})"
                         else:
                             action = f"retaining {old_label} and adding {new_label}"
-                            delta = history["Delta_BIC_joint_improvement"]
                         print(flush=True)
-                        print(f"LD COMPARISON: {action} ", flush=True)
-                        print(f"LD: {ld:.3f} | BIC improvement: {delta:.2f} | P-value: {result['P-value']:.2e}", flush=True)
+                        print(f"LD COMPARISON: {action}", flush=True)
+                        if criterion == "conditional":
+                            print(f"P({new_label} given {old_label}): {history['P_B_given_A']:.2e} | "
+                                  f"P({old_label} given {new_label}): {history['P_A_given_B']:.2e}", flush=True)
+                        elif recommendation == "A+B":
+                            print(f"BIC_A: {history['BIC_A']} | BIC_B: {history['BIC_B']} | "
+                                  f"BIC_AB: {history['BIC_AB']}", flush=True)
+                        print(f"LD: {ld:.3f} | Final association P-value: {result['P-value']:.2e}", flush=True)
                         print(flush=True)
                 else:
                     history.update(ACTION="skip", REASON="final model failed diagnostics or significance threshold",

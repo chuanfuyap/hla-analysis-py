@@ -491,7 +491,7 @@ continued = hp.stats.stepwise(
 
 This continues selection using the previously selected positions as the initial motif model. `max_steps` limits newly selected positions, excluding initial conditions. With LD checking enabled, positions selected together count as one step.
 
-### LD-informed stepwise selection (with BIC-based model selection.)
+### LD-informed stepwise selection
 
 Set `ld_check=True` to compare significant positions with other positions in high LD before selection. This is supported for both position and motif-based stepwise analysis.
 
@@ -509,7 +509,26 @@ Two LD methods are supported:
 
 The original winner’s LD partners are sorted once, from highest to lowest LD. Each is compared in turn using the selection updated by earlier comparisons; replacements and additions do not introduce new partners.
 
-Positions meeting the LD threshold are compared using the Bayesian Information Criterion (BIC), with a minimum BIC difference of 2. The comparison can **retain the original position, replace it or select both**. Any proposed selection must also meet the significance threshold.
+By default, `ld_criterion="bic"` compares positions using BIC (minimum difference of 2). Alternatively, `ld_criterion="conditional"` uses reciprocal conditional association tests to determine whether to retain, replace or jointly select positions in high LD.
+
+```python
+winners = hp.stats.stepwise(
+    hladat, cfg, selection="motif", y=phenotype, covar=covariates,
+    reference=reference, ld_check=True, ld_criterion="conditional",
+    ld_conditional_threshold=0.01,
+)
+```
+
+Linear models use F-tests, while logistic models use likelihood-ratio tests. Significance is defined by `ld_conditional_threshold` (default 0.01).
+
+| P(B given A) | P(A given B) | Decision |
+|---|---|---|
+| Significant | Significant | Select A + B |
+| Significant | Not significant | Replace A with B |
+| Not significant | Significant | Retain A |
+| Not significant | Not significant | Retain A |
+
+Unavailable tests retain the original position. Any final selection must also meet `significance_threshold`.
 
 For motif analysis, comparisons are restricted to the selected gene and use expanded motifs to evaluate alternative positions or their joint effects.
 
@@ -518,10 +537,35 @@ For motif analysis, comparisons are restricted to the selected gene and use expa
 The results retain the standard stepwise format, with additional information:
 
 - `SELECTED_VARIANTS`: Positions selected at each step, including jointly selected positions.
-- `winners.attrs["ld_comparisons"]`: LD comparisons and BIC-based decisions.
+- `winners.attrs["ld_comparisons"]`: Comparison results, both recommendations, the selected criterion and conditional threshold.
 - `winners.attrs["condition_on"]`: All selected positions for subsequent analysis.
 
-Jointly selected positions count as one step towards `max_steps`. With `verbose=True`, accepted changes are reported alongside their LD, BIC improvement and P-value.
+Jointly selected positions count as one step towards `max_steps`. With
+`verbose=True`, replacements and joint selections are printed with the final
+association P-value. BIC decisions show the compared BIC values, including
+`BIC_AB` for joint selections. Conditional decisions show both directional
+conditional P-values instead.
 
 By default, `ld_check=False`, and standard stepwise selection is unchanged.
 
+
+### Comparing positions directly
+
+The same criteria are available without running stepwise selection:
+
+```python
+comparison = hp.stats.compare_positions(
+    hladat, cfg, id_71, id_74, y=phenotype, covar=covariates,
+    criterion="conditional", conditional_threshold=0.01,
+)
+
+motif_comparison = hp.stats.compare_positions_motif(
+    hladat, cfg, positions_a=[id_11, id_71], positions_b=[id_11, id_74],
+    y=phenotype, covar=covariates, reference=reference,
+    criterion="conditional", conditional_threshold=0.01,
+)
+```
+
+Both return `BIC_RECOMMENDATION` and `CONDITIONAL_RECOMMENDATION`.
+`RECOMMENDATION` follows `criterion`, which defaults to `"bic"`. Conditional
+significance defaults to `0.01`; for BIC, `min_delta_bic` defaults to 2.

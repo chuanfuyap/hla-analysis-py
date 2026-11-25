@@ -12,6 +12,7 @@ Covariates are optional. Strings are encoded as categoricals using C(col) in for
 """
 
 from __future__ import annotations
+from numbers import Real
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
@@ -228,7 +229,8 @@ def fit_motif_omnibus(abt: pd.DataFrame, reduced_cols: list[str], expanded_cols:
     }
 
 
-def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_delta_bic=2.0):
+def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_delta_bic=2.0,
+                            criterion="bic", conditional_threshold=0.01):
     """Compare two groups of amino acid predictors using BIC and conditional tests.
 
     Models:
@@ -237,14 +239,15 @@ def fit_position_comparison(abt, a_cols, b_cols, covar_cols, model_type, *, min_
       AB: Y ~ covars + a_cols... + b_cols... (e.g. pos11 + pos13)
 
     Fit A, B and A+B with shared covariates and complete-case samples.
-    Return BIC, reciprocal conditional tests, a recommendation and INFO.
+    Return BIC and conditional recommendations, test results and INFO.
     """
     return _fit_comparison(abt, a_cols, b_cols, a_cols + b_cols, covar_cols,
-                           model_type, min_delta_bic=min_delta_bic)
+                           model_type, min_delta_bic=min_delta_bic,
+                           criterion=criterion, conditional_threshold=conditional_threshold)
 
 
 def fit_motif_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
-                         *, min_delta_bic=2.0, joint_issue=""):
+                         *, min_delta_bic=2.0, joint_issue="", criterion="bic", conditional_threshold=0.01):
     """Compare alternative motifs against their combined position motif.
 
     Models:
@@ -252,17 +255,20 @@ def fit_motif_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type
       B:  Y ~ covars + b_cols... (e.g. pos11-74)
       AB: Y ~ covars + joint_cols... (e.g. pos11-71-74)
 
-    Return BIC, reciprocal conditional tests, a recommendation and INFO.
+    Return BIC and conditional recommendations, test results and INFO.
     All models use identical complete-case samples.
     """
     return _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols,
                            model_type, min_delta_bic=min_delta_bic,
-                           check_nested=True, joint_issue=joint_issue)
+                           check_nested=True, joint_issue=joint_issue, criterion=criterion,
+                           conditional_threshold=conditional_threshold)
 
 
 def _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
-                    *, min_delta_bic, check_nested=False, joint_issue=""):
+                    *, min_delta_bic, check_nested=False, joint_issue="",
+                    criterion="bic", conditional_threshold=0.01):
     """Fit and summarise three models using one sample set."""
+    _validate_comparison_options(criterion, conditional_threshold)
     if model_type not in ("linear", "logit"):
         raise ValueError("model_type must be 'linear' or 'logit'.")
     if not np.isfinite(min_delta_bic) or min_delta_bic < 0:
@@ -376,11 +382,15 @@ def _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
     delta_joint = best_single_bic - bic_ab
 
     if np.isfinite(delta_joint) and delta_joint >= min_delta_bic:
-        recommendation = "A+B"
+        bic_recommendation = "A+B"
     elif bic_a == bic_b or abs(bic_a - bic_b) < min_delta_bic:
-        recommendation = "A/B unresolved"
+        bic_recommendation = "A/B unresolved"
     else:
-        recommendation = best_single
+        bic_recommendation = best_single
+
+    conditional_recommendation = _conditional_recommendation(
+        p_b_given_a, p_a_given_b, df_b_given_a, df_a_given_b, conditional_threshold)
+    recommendation = bic_recommendation if criterion == "bic" else conditional_recommendation
 
     return {
         "N_used": n,
@@ -393,6 +403,29 @@ def _fit_comparison(abt, a_cols, b_cols, joint_cols, covar_cols, model_type,
         "P_A_given_B": p_a_given_b,
         "DoF_B_given_A": df_b_given_a,
         "DoF_A_given_B": df_a_given_b,
+        "BIC_RECOMMENDATION": bic_recommendation,
+        "CONDITIONAL_RECOMMENDATION": conditional_recommendation,
         "RECOMMENDATION": recommendation,
         "INFO": joint_issue,
     }
+
+
+def _validate_comparison_options(criterion, conditional_threshold):
+    """Check how model recommendations will be selected."""
+    if criterion not in ("bic", "conditional"):
+        raise ValueError("criterion must be 'bic' or 'conditional'.")
+    if (isinstance(conditional_threshold, bool) or not isinstance(conditional_threshold, Real)
+            or not np.isfinite(conditional_threshold) or not 0 < conditional_threshold < 1):
+        raise ValueError("conditional_threshold must be finite and strictly between 0 and 1.")
+
+
+def _conditional_recommendation(p_b_given_a, p_a_given_b, df_b_given_a, df_a_given_b, threshold):
+    """Choose positions using the two reciprocal conditional tests."""
+    # Missing tests are not evidence that a position has no additional effect.
+    if (not np.isfinite([p_b_given_a, p_a_given_b, df_b_given_a, df_a_given_b]).all()
+            or df_b_given_a <= 0 or df_a_given_b <= 0
+            or not 0 <= p_b_given_a <= 1 or not 0 <= p_a_given_b <= 1):
+        return "A/B unresolved"
+    if p_b_given_a < threshold:
+        return "A+B" if p_a_given_b < threshold else "B"
+    return "A" if p_a_given_b < threshold else "A/B unresolved"
