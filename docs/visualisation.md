@@ -79,9 +79,6 @@ fig, ax = hp.vis.plot_aa_association(
 
 ```
 
-![HLA interaction plotted using equally spaced positions](images/interaction_equallyspaced.png)
-
-
 `highlight_top=True` selects the strongest hit; `highlight_top=3` selects three.
 `highlights=[("B", 63), ("DRB1", 11)]` selects gene and sequence-position pairs;
 exact position IDs are also accepted. Gene is always part of tuple matching.
@@ -117,6 +114,8 @@ for kind in ["scatter3d", "heatmap"]:
         save_path=f"interaction_{kind}.pdf",
     )
 ```
+
+![HLA interaction plotted using equally spaced positions](images/interaction_equallyspaced.png)
 
 The X-axis represents HLA amino acid positions, while the Y-axis represents partner genomic coordinates. In 3D plots, height and colour represent −log₁₀(P).
 
