@@ -318,7 +318,7 @@ Mapping issues can be inspected using `hladat.hla_mapping.issues`.
 
 At two-field HLA allele resolution, amino acid sequences are generally consistent across matching reference alleles. Differences mainly arise from incomplete sequences (*) and alignment gaps (.).
 
-- * (missing sequence): If a known residue is available from another matching allele, that residue is used. Otherwise, the position remains unresolved (?).
+- * (unknown sequence): If a known residue is available from another matching allele, that residue is used. Otherwise, the position remains unresolved (?).
 - . (alignment gap): Represents the absence of an amino acid at that alignment position. Unlike *, this is a known state.
 - Combined states (e.g. .P): When matching alleles contain either a gap or a residue, both possibilities are retained as a single category.
 
